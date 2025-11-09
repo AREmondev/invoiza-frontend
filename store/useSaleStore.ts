@@ -11,17 +11,19 @@ interface Item {
 interface SaleTab {
   id: string;
   customerName: string;
+  billingName?: string;
   items: Item[];
   discount: number;
-  total: number;
+  total: number; // raw subtotal of items
 }
 
 interface SaleStore {
   activeSaleTab: string;
   saleTabs: Record<string, SaleTab>;
   updateCustomerName: (tabId: string, customerName: string) => void;
+  updateBillingName: (tabId: string, billingName: string) => void;
   updateDiscount: (tabId: string, discount: number) => void;
-  updateTotal: (tabId: string, total: number) => void;
+  updateTotal: (tabId: string, total: number) => void; // set raw subtotal
   addSaleTab: (tabId: string, customerName?: string) => void;
   removeSaleTab: (tabId: string) => void;
 }
@@ -39,6 +41,17 @@ export const useSaleStore = create<SaleStore>((set) => ({
         },
       },
     })),
+  updateBillingName: (tabId, billingName) =>
+    set((state) => ({
+      saleTabs: {
+        ...state.saleTabs,
+        [tabId]: {
+          ...state.saleTabs[tabId],
+          billingName,
+        },
+      },
+    })),
+  // Only update discount value; do not mutate total here
   updateDiscount: (tabId, discount) =>
     set((state) => ({
       saleTabs: {
@@ -46,17 +59,17 @@ export const useSaleStore = create<SaleStore>((set) => ({
         [tabId]: {
           ...state.saleTabs[tabId],
           discount,
-          total: state.saleTabs[tabId].total * (1 - discount / 100),
         },
       },
     })),
+  // Store raw subtotal of items; UI will compute discounted/rounded totals
   updateTotal: (tabId, total) =>
     set((state) => ({
       saleTabs: {
         ...state.saleTabs,
         [tabId]: {
           ...state.saleTabs[tabId],
-          total: total * (1 - (state.saleTabs[tabId]?.discount || 0) / 100),
+          total,
         },
       },
     })),
@@ -67,6 +80,7 @@ export const useSaleStore = create<SaleStore>((set) => ({
         [tabId]: {
           id: tabId,
           customerName,
+          billingName: "",
           items: [],
           discount: 0,
           total: 0,

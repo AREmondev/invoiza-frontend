@@ -4,11 +4,14 @@ import { TabManager } from "@/components/sales/TabManager";
 
 export default function SalesPage() {
   return (
-    <div className="p-6 h-[calc(100vh-65px)]">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Sales</h1>
+    <div className="relative">
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-10 select-none">
+        <div className="text-[8rem] font-bold tracking-widest">DRAFT</div>
       </div>
-      <TabManager />
+      <div className="relative z-10">
+        <h1 className="text-2xl font-semibold mb-4">Sales</h1>
+        <TabManager />
+      </div>
     </div>
   );
 }
