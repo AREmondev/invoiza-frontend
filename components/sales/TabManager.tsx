@@ -144,7 +144,10 @@ export function TabManager() {
                 <SalesList />
               </div>
             ) : (
-              <NewSaleForm initialCustomerName={tab.customerName} />
+              <NewSaleForm
+                tabId={tab.id}
+                initialCustomerName={tab.customerName}
+              />
             )}
           </div>
         ))}
