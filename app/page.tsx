@@ -1,43 +1,66 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { Overview } from '@/components/dashboard/Overview';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DollarSign, Users, ShoppingCart, TrendingUp } from 'lucide-react';
-
-const stats = [
-  {
-    name: 'Total Revenue',
-    value: '$45,231.89',
-    icon: DollarSign,
-    change: '+20.1%',
-    trend: 'up',
-  },
-  {
-    name: 'Customers',
-    value: '2,350',
-    icon: Users,
-    change: '+15.2%',
-    trend: 'up',
-  },
-  {
-    name: 'Sales',
-    value: '12,234',
-    icon: ShoppingCart,
-    change: '+12.2%',
-    trend: 'up',
-  },
-  {
-    name: 'Growth',
-    value: '24.5%',
-    icon: TrendingUp,
-    change: '+4.3%',
-    trend: 'up',
-  },
-];
+import { DollarSign, Users, ShoppingCart, TrendingUp, Package, AlertTriangle } from 'lucide-react';
+import { useProductStore } from '@/store/useProductStore';
+import { useInvoiceStore } from '@/store/useInvoiceStore';
+import { useUserStore } from '@/store/useUserStore';
 
 export default function Home() {
+  const { products, getLowStockProducts } = useProductStore();
+  const { salesInvoices, purchaseInvoices } = useInvoiceStore();
+  const { currentUser } = useUserStore();
+  const [stats, setStats] = useState<any[]>([]);
+  const [lowStockProducts, setLowStockProducts] = useState<any[]>([]);
+  console.log('currentUser', currentUser);
+  useEffect(() => {
+    // Calculate real statistics from store data
+    const totalRevenue = salesInvoices.reduce((sum, invoice) => sum + invoice.totalCents, 0);
+    const totalPurchases = purchaseInvoices.reduce((sum, invoice) => sum + invoice.totalCents, 0);
+    const lowStock = getLowStockProducts();
+    
+    setStats([
+      {
+        name: 'Total Revenue',
+        value: `$${(totalRevenue / 100).toLocaleString()}`,
+        icon: DollarSign,
+        change: '+12.5%',
+        trend: 'up',
+      },
+      {
+        name: 'Total Products',
+        value: products.length.toString(),
+        icon: Package,
+        change: '+5.2%',
+        trend: 'up',
+      },
+      {
+        name: 'Sales Invoices',
+        value: salesInvoices.length.toString(),
+        icon: ShoppingCart,
+        change: '+8.1%',
+        trend: 'up',
+      },
+      {
+        name: 'Low Stock Items',
+        value: lowStock.length.toString(),
+        icon: AlertTriangle,
+        change: lowStock.length > 0 ? 'Needs attention' : 'Good',
+        trend: lowStock.length > 0 ? 'down' : 'up',
+      },
+    ]);
+    
+    setLowStockProducts(lowStock);
+  }, [products, salesInvoices, purchaseInvoices, getLowStockProducts]);
+
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Welcome back, {currentUser?.name || 'User'}!
+        </h1>
         <p className="text-muted-foreground">
           Your business performance at a glance
         </p>
@@ -64,13 +87,41 @@ export default function Home() {
                   >
                     {stat.change}
                   </span>{' '}
-                  from last month
+                  {stat.name !== 'Low Stock Items' && 'from last month'}
                 </p>
               </CardContent>
             </Card>
           );
         })}
       </div>
+
+      {lowStockProducts.length > 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-orange-800">
+              <AlertTriangle className="h-5 w-5" />
+              Low Stock Alert
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {lowStockProducts.slice(0, 3).map((product) => (
+                <div key={product.id} className="flex justify-between items-center">
+                  <span className="font-medium">{product.name}</span>
+                  <span className="text-sm text-orange-600">
+                    {product.stockQuantity} remaining
+                  </span>
+                </div>
+              ))}
+              {lowStockProducts.length > 3 && (
+                <p className="text-sm text-orange-600 mt-2">
+                  and {lowStockProducts.length - 3} more items...
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

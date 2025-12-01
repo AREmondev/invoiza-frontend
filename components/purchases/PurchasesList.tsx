@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { Invoice } from "@/types/models";
 
 const purchases = [
   {
@@ -46,7 +47,11 @@ const purchases = [
   },
 ];
 
-export function PurchasesList() {
+interface PurchasesListProps {
+  onEditPurchase?: (purchase: Invoice) => void;
+}
+
+export function PurchasesList({ onEditPurchase }: PurchasesListProps) {
   const [showPurchaseNumber, setShowPurchaseNumber] = useState(true);
   const [showSupplier, setShowSupplier] = useState(true);
   const [showDate, setShowDate] = useState(true);
@@ -62,8 +67,42 @@ export function PurchasesList() {
 
   const onEdit = (id: string) => {
     const row = rows.find((r) => r.id === id) || null;
-    setEditable(row);
-    setEditOpen(true);
+    if (onEditPurchase && row) {
+      // Convert the mock data to PurchaseInvoice format
+      const purchaseInvoice: Invoice = {
+        id: row.id,
+        supplierId: row.supplierName,
+        invoiceNumber: row.purchaseNumber,
+        type: "purchase",
+        invoiceDate: row.date,
+        status: row.status.toLowerCase() as any,
+        paymentStatus: row.paymentStatus.toLowerCase() as any,
+        paymentMethod: "cash",
+        lineItems: [],
+        additionalCharges: [],
+        payments: [],
+        returns: [],
+        auditLogs: [],
+        subtotalCents: row.amount * 100,
+        discountCents: 0,
+        discountType: "percentage",
+        discountValue: 0,
+        additionalChargesCents: 0,
+        taxCents: 0,
+        totalCents: row.amount * 100,
+        paidCents: 0,
+        dueCents: row.amount * 100,
+        isLocked: false,
+        createdAt: row.date,
+        updatedAt: new Date(),
+        createdBy: "system",
+        updatedBy: "system",
+      };
+      onEditPurchase(purchaseInvoice);
+    } else {
+      setEditable(row);
+      setEditOpen(true);
+    }
   };
 
   const onDelete = (id: string) => {

@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { NewSaleForm } from "@/components/sales/NewSaleForm";
+import { EnhancedSaleForm } from "@/components/sales/EnhancedSaleForm";
 import { SalesList } from "@/components/sales/SalesList";
+import { SalesListAdvanced } from "@/components/sales/sales-list-advanced";
 import { CustomerSelectModal } from "@/components/sales/CustomerSelectModal";
 import { useSaleStore } from "@/store/useSaleStore";
 
@@ -22,6 +23,7 @@ export function TabManager() {
   ]);
   const [activeTab, setActiveTab] = useState("main");
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [useAdvancedTable, setUseAdvancedTable] = useState(true);
   const { addSaleTab, removeSaleTab, saleTabs } = useSaleStore();
 
   useEffect(() => {
@@ -138,13 +140,27 @@ export function TabManager() {
           >
             {tab.type === "list" ? (
               <div>
-                <Button onClick={handleAddSaleClick} className="mb-4">
-                  Add Sale
-                </Button>
-                <SalesList />
+                <div className="flex justify-between items-center mb-4">
+                  <Button onClick={handleAddSaleClick}>
+                    Add Sale
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUseAdvancedTable(!useAdvancedTable)}
+                  >
+                    <Settings className="h-4 w-4 mr-2" />
+                    {useAdvancedTable ? "Use Basic Table" : "Use Advanced Table"}
+                  </Button>
+                </div>
+                {useAdvancedTable ? (
+                  <SalesListAdvanced userId="current-user" />
+                ) : (
+                  <SalesList />
+                )}
               </div>
             ) : (
-              <NewSaleForm
+              <EnhancedSaleForm
                 tabId={tab.id}
                 initialCustomerName={tab.customerName}
               />

@@ -1,16 +1,30 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SalesReport } from "@/components/reports/SalesReport";
+import { SalesReportAdvanced } from "@/components/reports/sales-report-advanced";
 import { PurchaseReport } from "@/components/reports/PurchaseReport";
 import { InventoryReport } from "@/components/reports/InventoryReport";
+import { Button } from "@/components/ui/button";
+import { Settings } from "lucide-react";
 
 export default function ReportsPage() {
+  const [useAdvancedTable, setUseAdvancedTable] = useState(true);
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Reports</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setUseAdvancedTable(!useAdvancedTable)}
+        >
+          <Settings className="h-4 w-4 mr-2" />
+          {useAdvancedTable ? "Use Basic Table" : "Use Advanced Table"}
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
@@ -47,7 +61,11 @@ export default function ReportsPage() {
           <TabsTrigger value="inventory">Inventory Report</TabsTrigger>
         </TabsList>
         <TabsContent value="sales">
-          <SalesReport />
+          {useAdvancedTable ? (
+            <SalesReportAdvanced userId="current-user" />
+          ) : (
+            <SalesReport />
+          )}
         </TabsContent>
         <TabsContent value="purchases">
           <PurchaseReport />

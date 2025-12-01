@@ -2,9 +2,11 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/theme-provider";
-import Header from "@/components/layout/Header";
-import Sidebar from "@/components/layout/Sidebar";
+import { ConvexClientProvider } from "@/app/providers/convex-provider";
+import { AuthProvider } from "@/app/providers/auth-provider";
+import { ConditionalLayout } from "@/components/layout/ConditionalLayout";
 import { GlobalCustomerModal } from "@/components/shared/GlobalCustomerModal";
+import { DataInitializationProvider } from "@/components/providers/data-initialization-provider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -27,14 +29,16 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <div className="relative flex min-h-screen">
-            <Sidebar />
-            <div className="flex-1 lg:pl-72">
-              <Header />
-              <main className="p-6">{children}</main>
-            </div>
-          </div>
-          <GlobalCustomerModal />
+          <AuthProvider>
+            <ConvexClientProvider>
+              <DataInitializationProvider>
+                <ConditionalLayout>
+                  {children}
+                </ConditionalLayout>
+                <GlobalCustomerModal />
+              </DataInitializationProvider>
+            </ConvexClientProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
