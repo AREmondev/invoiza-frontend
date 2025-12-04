@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AdvancedDataTable } from "@/components/ui/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,22 +12,58 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { AdvancedColumnDef } from "@/components/ui/advanced-data-table";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/lib/convex";
+import { useSession } from "next-auth/react";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
 
 interface SalesListAdvancedProps {
   userId?: string;
 }
 
-// Mock data for sales
-const salesData = [
-  { id: "INV-001", customer: "John Doe", date: "2024-10-01", amount: 250.0, paymentStatus: "Paid", paymentMethod: "Cash", whatsapp: "+1234567890" },
-  { id: "INV-002", customer: "Jane Smith", date: "2024-10-02", amount: 150.5, paymentStatus: "Due", paymentMethod: "Bank", whatsapp: "+1987654321" },
-  { id: "INV-003", customer: "Acme Corp", date: "2024-10-03", amount: 320.0, paymentStatus: "Partial", paymentMethod: "Mobile Banking", whatsapp: "+1122334455" },
-  { id: "INV-004", customer: "Tech Solutions", date: "2024-10-04", amount: 875.25, paymentStatus: "Paid", paymentMethod: "Bank", whatsapp: "+1555666777" },
-  { id: "INV-005", customer: "Global Retail", date: "2024-10-05", amount: 1200.0, paymentStatus: "Due", paymentMethod: "Cash", whatsapp: "+1444333222" },
-];
-
 export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+  const { toast } = useToast();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [saleToDelete, setSaleToDelete] = useState<{ id: string; invoiceNumber: string; _id: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Fetch sales invoices from Convex
+  const invoices = useQuery(
+    api.queries.invoices.getInvoices,
+    userEmail ? { userEmail, type: "sale" } : "skip"
+  ) || [];
+
+  // Delete mutation
+  const deleteInvoiceMutation = useMutation(api.mutations.invoices.deleteInvoice);
+
+  // Transform invoices to match table format
+  const salesData = invoices.map((invoice: any) => ({
+    id: invoice.invoiceNumber,
+    customer: invoice.customerName || invoice.billingName || "N/A",
+    date: format(new Date(invoice.invoiceDate), "yyyy-MM-dd"),
+    amount: invoice.totalCents / 100,
+    paymentStatus: invoice.paymentStatus === "paid" ? "Paid" : 
+                   invoice.paymentStatus === "partial" ? "Partial" : 
+                   invoice.paymentStatus === "overpaid" ? "Overpaid" : "Due",
+    paymentMethod: invoice.paymentMethod || "N/A",
+    whatsapp: "", // Will be fetched from customer if needed
+    _id: invoice._id, // Store Convex ID for operations
+  }));
+
   const columns: AdvancedColumnDef<typeof salesData[0], any>[] = [
     {
       accessorKey: "id",
@@ -119,14 +156,16 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(sale.id)}>
+              <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(sale._id, sale.id)}>
                 <Trash className="mr-2 h-4 w-4" />
                 Delete
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleWhatsAppShare(sale.whatsapp, sale.id, sale.amount)}>
-                <MessageCircle className="mr-2 h-4 w-4" />
-                WhatsApp
-              </DropdownMenuItem>
+              {sale.whatsapp && (
+                <DropdownMenuItem onClick={() => handleWhatsAppShare(sale.whatsapp, sale.id, sale.amount)}>
+                  <MessageCircle className="mr-2 h-4 w-4" />
+                  WhatsApp
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -136,14 +175,50 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
 
   const handleEdit = (saleId: string) => {
     console.log("Edit sale:", saleId);
+    // TODO: Implement edit functionality
   };
 
-  const handleDelete = (saleId: string) => {
-    console.log("Delete sale:", saleId);
+  const handleDelete = (invoiceId: string, invoiceNumber: string) => {
+    setSaleToDelete({
+      id: invoiceNumber,
+      invoiceNumber: invoiceNumber,
+      _id: invoiceId,
+    });
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!saleToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteInvoiceMutation({
+        invoiceId: saleToDelete._id as any,
+        userEmail: userEmail || undefined,
+      });
+
+      toast({
+        title: "Success",
+        description: `Sale ${saleToDelete.invoiceNumber} deleted successfully`,
+      });
+
+      setDeleteDialogOpen(false);
+      setSaleToDelete(null);
+    } catch (error: any) {
+      console.error("Error deleting sale:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete sale. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleWhatsAppShare = (number: string, saleId: string, amount: number) => {
-    const text = encodeURIComponent(`Invoice ${saleId} amount ${amount} is ${salesData.find((s) => s.id === saleId)?.paymentStatus || "Paid"}. Thank you!`);
+    const sale = salesData.find((s) => s.id === saleId);
+    const text = encodeURIComponent(`Invoice ${saleId} amount $${amount.toFixed(2)} is ${sale?.paymentStatus || "Paid"}. Thank you!`);
     const url = `https://wa.me/${number}?text=${text}`;
     window.open(url, "_blank");
   };
@@ -167,6 +242,34 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
         defaultPageSize={10}
         pageSizeOptions={[5, 10, 25, 50, 100]}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Sale</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete sale <strong>{saleToDelete?.invoiceNumber}</strong>? 
+              This action cannot be undone and will permanently remove this sale from the system.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting} onClick={() => {
+              setDeleteDialogOpen(false);
+              setSaleToDelete(null);
+            }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Plus, Save, Eye, Trash2, Calculator, DollarSign, User, Calendar, Package, AlertCircle, ShoppingCart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,17 +20,20 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 // Import our custom components
-import { ProductSelector, LineEditor, ChargesSelector, BillingAliasSelector, CustomerDueHistory, PaymentModule } from '@/components/shared';
+import { ProductSelector, LineEditor, ChargesSelector, PaymentModule, CustomerDetailsModal, ProductDetailsOffcanvas } from '@/components/shared';
 import { CommissionAgentSelector } from '@/components/shared/CommissionAgentSelector';
 import { useSaleStore } from '@/store/useSaleStore';
 import { useProductStore } from '@/store/useProductStore';
 import { useInvoiceStore } from '@/store/useInvoiceStore';
 import { useUserStore } from '@/store/useUserStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import { useToast } from '@/hooks/use-toast';
+import { useQuery, useMutation } from 'convex/react';
+import { useSession } from 'next-auth/react';
+import { api } from '@/lib/convex';
 
 // Import types
-import { InvoiceLineItem, AppliedAdditionalCharge, CreateInvoiceDTO, Customer } from '@/types';
-import { mockCustomers } from '@/lib/mock-data';
+import { InvoiceLineItem, AppliedAdditionalCharge, CreateInvoiceDTO, Customer, Product } from '@/types';
 
 interface EnhancedSaleFormProps {
   tabId: string;
@@ -40,10 +43,11 @@ interface EnhancedSaleFormProps {
 // Form validation schema
 const saleFormSchema = z.object({
   customerId: z.string().min(1, 'Customer is required'),
-  billingAliasId: z.string().optional(),
+  billingName: z.string().optional(), // Simple string input for billing name
   invoiceDate: z.date(),
   dueDate: z.date().optional(),
   paymentMethod: z.string().min(1, 'Payment method is required'),
+  paymentAmount: z.number().min(0).optional(), // Payment amount in cents
   paymentStatus: z.enum(['pending', 'partial', 'paid', 'overpaid']),
   discountType: z.enum(['percentage', 'fixed']),
   discountValue: z.number().min(0).max(100),
@@ -62,55 +66,177 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
   const [agreementWarnings, setAgreementWarnings] = useState<string[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedCommissionAgentId, setSelectedCommissionAgentId] = useState<string | undefined>();
+  const [showCustomerDetails, setShowCustomerDetails] = useState(false);
+  const [selectedProductForDetails, setSelectedProductForDetails] = useState<Product | null>(null);
+  const [showProductDetailsOffcanvas, setShowProductDetailsOffcanvas] = useState(false);
 
   // Store hooks
   const { saleTabs, updateCustomerName, updateBillingName, updateDiscount, updateTotal } = useSaleStore();
-  const { products } = useProductStore();
-  const { createInvoice, calculateSubtotal, calculateTotal, calculateDueAmount } = useInvoiceStore();
+  const { products, setProducts } = useProductStore();
+  const { calculateSubtotal, calculateTotal, calculateDueAmount } = useInvoiceStore();
   const { currentUser, preferences } = useUserStore();
   const { features, businessRules } = useSettingsStore();
+  const { toast } = useToast();
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+
+  // Load products from Convex
+  const convexProducts = useQuery(
+    api.queries.products.getProducts,
+    userEmail ? { userEmail } : "skip"
+  );
+
+  // Load customers from Convex
+  const convexCustomers = useQuery(
+    api.queries.customers.getCustomers,
+    userEmail ? { userEmail } : "skip"
+  ) || [];
+
+  // Convert Convex customers to Customer type - memoized to prevent re-renders
+  const customers: Customer[] = useMemo(() => {
+    return (convexCustomers || []).map((c: any) => ({
+      id: c._id,
+      name: c.name,
+      type: (c.type || 'individual') as 'individual' | 'business',
+      email: c.email,
+      phone: c.phone || c.mobile,
+      creditLimit: c.metadata?.creditLimit || 0,
+      paymentTerms: c.metadata?.paymentTerms || 30,
+      receivableBalance: 0,
+      payableBalance: 0,
+      isActive: c.isActive !== false,
+      billingAliases: (c.billingAliases || []).map((alias: string, idx: number) => ({
+        id: `alias-${idx}`,
+        customerId: c._id,
+        name: alias,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        createdBy: 'system',
+        updatedBy: 'system',
+      })),
+      agreements: [],
+      auditLogs: [],
+      createdAt: new Date(c.createdAt || Date.now()),
+      updatedAt: new Date(c.updatedAt || Date.now()),
+      createdBy: c.createdBy || 'system',
+      updatedBy: c.updatedBy || 'system',
+    }));
+  }, [convexCustomers]);
+
+  // Update products in store when Convex products load
+  useEffect(() => {
+    if (convexProducts && convexProducts.length > 0) {
+      // Convert Convex products to Product type
+      const convertedProducts = convexProducts.map((p: any) => ({
+        id: p._id,
+        name: p.name,
+        description: p.description,
+        sku: p.sku,
+        barcode: p.barcode,
+        brandId: p.brandId,
+        categoryId: p.categoryId,
+        baseUnit: p.baseUnit?.abbreviation || 'piece',
+        salePrice: p.salePrice,
+        purchasePrice: p.purchasePrice,
+        stockQuantity: p.stockQuantity || 0,
+        stockValue: p.stockValue || 0,
+        minStockLevel: p.minStockLevel || 0,
+        maxStockLevel: p.maxStockLevel || 0,
+        trackInventory: true,
+        variations: (p.variations || []).map((v: any, idx: number) => ({
+          id: v.id || `var-${idx}`,
+          productId: p._id,
+          name: v.name,
+          sku: v.sku,
+          attributes: v.attributes || {},
+          barcode: v.barcode,
+          isActive: v.isActive !== false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          createdBy: 'system',
+          updatedBy: 'system',
+        })),
+        units: p.unitPricingDetails?.map((up: any) => ({
+          id: up.unitId || `unit-${up.unit?.abbreviation}`,
+          productId: p._id,
+          unit: up.unit?.abbreviation || 'piece',
+          price: up.salePrice,
+          cost: up.purchasePrice,
+          conversionFactor: 1,
+          isBaseUnit: up.unitId === p.baseUnitId,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          createdBy: 'system',
+          updatedBy: 'system',
+        })) || [],
+        images: p.images || [],
+        metadata: p.metadata || {},
+        godowns: [],
+        auditLogs: [],
+        isActive: p.isActive !== false,
+        createdAt: new Date(p.createdAt || Date.now()),
+        updatedAt: new Date(p.updatedAt || Date.now()),
+        createdBy: p.createdBy || 'system',
+        updatedBy: p.updatedBy || 'system',
+      }));
+      setProducts(convertedProducts )
+    }
+  }, [convexProducts, setProducts]);
 
   // Form setup
   const form = useForm<SaleFormData>({
     resolver: zodResolver(saleFormSchema),
     defaultValues: {
       customerId: '',
-      billingAliasId: '',
+      billingName: '',
       invoiceDate: new Date(),
       paymentMethod: preferences?.lastUsedPaymentMethod || 'cash',
+      paymentAmount: 0,
       paymentStatus: 'pending',
       discountType: 'percentage',
       discountValue: 0,
     },
   });
 
+  // Convex mutation for creating invoices
+  const createInvoiceMutation = useMutation(api.mutations.invoices.createInvoice);
+
   const currentTab = saleTabs[tabId];
   const customerId = form.watch('customerId');
   const discountType = form.watch('discountType');
   const discountValue = form.watch('discountValue');
 
-  // Load customer when customerId changes
+  // Load customer when customerId changes - only when customers are loaded
   useEffect(() => {
+    if (!convexCustomers || convexCustomers.length === 0) return;
+    
     if (customerId) {
-      const customer = mockCustomers.find(c => c.id === customerId);
-      setSelectedCustomer(customer || null);
+      const customer = customers.find(c => c.id === customerId);
       if (customer) {
+        // Only update if customer changed to prevent unnecessary re-renders
+        setSelectedCustomer(prev => {
+          if (prev?.id === customer.id) return prev;
+          return customer;
+        });
         updateCustomerName(tabId, customer.name);
+      } else {
+        setSelectedCustomer(null);
       }
     } else {
       setSelectedCustomer(null);
     }
-  }, [customerId, tabId, updateCustomerName]);
+  }, [customerId, convexCustomers, customers, tabId, updateCustomerName]);
 
   // Set initial customer if provided
   useEffect(() => {
-    if (initialCustomerName && !customerId) {
-      const customer = mockCustomers.find(c => c.name.toLowerCase().includes(initialCustomerName.toLowerCase()));
+    if (initialCustomerName && !customerId && customers.length > 0) {
+      const customer = customers.find(c => c.name.toLowerCase().includes(initialCustomerName.toLowerCase()));
       if (customer) {
         form.setValue('customerId', customer.id);
       }
     }
-  }, [initialCustomerName, customerId, form]);
+  }, [initialCustomerName, customerId, customers, form]);
 
   // Calculate totals
   const subtotal = lineItems.reduce((sum, item) => sum + item.totalPriceCents, 0);
@@ -129,12 +255,7 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
     updateTotal(tabId, subtotal);
   }, [subtotal, tabId, updateTotal]);
 
-  // Add initial line item when form loads
-  useEffect(() => {
-    if (lineItems.length === 0) {
-      addNewLineItem();
-    }
-  }, []);
+  // Don't auto-add line item - start with empty form
 
   const addNewLineItem = () => {
     const newItem: InvoiceLineItem = {
@@ -176,11 +297,12 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
   };
 
   const handleCustomerChange = (customerId: string) => {
-    const customer = mockCustomers.find(c => c.id === customerId);
-    if (customer) {
-      updateCustomerName(tabId, customer.name);
-      setSelectedCustomer(customer);
-    }
+    console.log('Customer changed:', customerId, customers);
+    // const customer = customers.find(c => c.id === customerId);
+    // if (customer) {
+    //   updateCustomerName(tabId, customer.name);
+    //   setSelectedCustomer(customer);
+    // }
   };
 
   const handleSubmit = async (data: SaleFormData) => {
@@ -189,7 +311,12 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
     try {
       // Validate line items
       if (lineItems.some(item => !item.productId || item.quantity <= 0)) {
-        alert('Please select products and set quantities for all line items');
+        toast({
+          title: "Validation Error",
+          description: "Please select products and set quantities for all line items",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
         return;
       }
 
@@ -211,48 +338,53 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
         return;
       }
 
-      // Create invoice DTO
-      const invoiceData: CreateInvoiceDTO = {
+      // Create invoice using Convex mutation
+      const invoiceId = await createInvoiceMutation({
         type: 'sale',
-        customerId: data.customerId,
-        billingName: data.billingAliasId ? `alias-${data.billingAliasId}` : undefined,
-        invoiceDate: data.invoiceDate,
-        dueDate: data.dueDate,
+        customerId: data.customerId as any,
+        billingName: data.billingName || undefined,
+        invoiceDate: data.invoiceDate.getTime(), // Convert Date to timestamp
+        dueDate: data.dueDate ? data.dueDate.getTime() : undefined,
         discountCents: discountAmount,
         discountType: data.discountType,
         discountValue: data.discountValue,
-        commissionAgentId: selectedCommissionAgentId,
+        commissionAgentId: selectedCommissionAgentId as any,
         notes: data.notes,
         terms: data.terms,
         lineItems: lineItems.map(item => ({
-          productId: item.productId,
+          productId: item.productId as any,
           variationId: item.variationId,
           unit: item.unit,
           quantity: item.quantity,
           unitPriceCents: item.unitPriceCents,
-          discountCents: item.discountCents,
+          discountCents: 0, // No product-wise discount
           notes: item.notes,
         })),
         additionalCharges: additionalCharges.map(charge => ({
-          additionalChargeId: charge.additionalChargeId,
+          additionalChargeId: charge.additionalChargeId as any,
           lineItemIds: charge.lineItemIds,
         })),
-      };
-
-      // Create invoice (will be connected to Convex)
-      console.log('Creating invoice:', invoiceData);
-      await createInvoice(invoiceData);
+        userEmail: userEmail || undefined,
+      });
       
-      // Show success and reset form
-      alert('Sale created successfully!');
+      // Show success toast and reset form
+      toast({
+        title: "Success",
+        description: "Sale created successfully!",
+      });
+      
       setLineItems([]);
       addNewLineItem();
       form.reset();
       setAgreementWarnings([]);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating sale:', error);
-      alert('Error creating sale. Please try again.');
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create sale. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -269,42 +401,79 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
     }).format(amount / 100);
   };
 
+  // {customers.map((customer) => (
+  //   <SelectItem key={customer.id} value={customer.id}>
+  //     <div className="flex items-center gap-2">
+  //       <User className="h-4 w-4" />
+  //       <span>{customer.name}</span>
+  //       <Badge variant="outline" className="text-xs">
+  //         {customer.type}
+  //       </Badge>
+  //     </div>
+  //   </SelectItem>
+  // ))}
+
+
+
   return (
-    <div className="flex flex-col h-full max-w-[1800px] mx-auto">
+    <div className="flex flex-col h-full max-w-[1800px] mx-auto bg-gray-50">
       <Form {...form}>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="flex-1 flex flex-col">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b bg-background sticky top-0 z-10">
-            <div className="flex items-center gap-3">
-              <ShoppingCart className="h-6 w-6 text-primary" />
-              <h2 className="text-2xl font-bold">New Sale</h2>
-              {selectedCustomer && (
-                <Badge variant="outline" className="text-sm">
-                  {selectedCustomer.name}
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handlePreview}
-                disabled={lineItems.length === 0 || !customerId}
-              >
-                <Eye className="h-4 w-4 mr-2" />
-                Preview
-              </Button>
-              <Button type="submit" disabled={isSubmitting || lineItems.length === 0 || !customerId}>
-                <Save className="h-4 w-4 mr-2" />
-                {isSubmitting ? 'Saving...' : 'Save Sale'}
-              </Button>
-            </div>
-          </div>
+  
 
           {/* Main Content - Split Layout */}
-          <div className="flex-1 flex gap-4 p-4 overflow-hidden">
+          <div className="flex-1 flex gap-6 p-6 overflow-hidden">
             {/* Left Column - Form Fields */}
-            <div className="flex-1 flex flex-col gap-4 overflow-y-auto">
+            <div className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2">
+              {/* Invoice Date and Due Date */}
+              <Card className="p-4 shadow-sm bg-blue-50 border-blue-200">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="invoiceDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-base font-semibold flex items-center gap-2">
+                          <Calendar className="h-5 w-5 text-primary" />
+                          Invoice Date *
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="date"
+                            value={field.value ? format(field.value, 'yyyy-MM-dd') : ''}
+                            onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : new Date())}
+                            className="bg-white"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="dueDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-base font-semibold flex items-center gap-2">
+                          <Calendar className="h-5 w-5 text-primary" />
+                          Due Date
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="date"
+                            value={field.value ? format(field.value, 'yyyy-MM-dd') : ''}
+                            onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                            className="bg-white"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </Card>
+
               {/* Agreement Warnings */}
               {agreementWarnings.length > 0 && (
                 <Alert variant="destructive">
@@ -320,86 +489,85 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                 </Alert>
               )}
 
-              {/* Customer and Billing Information */}
-              <Card className="p-4">
+              {/* Commission Agent - Moved to Top */}
+              <Card className="p-6 shadow-sm">
                 <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <User className="h-5 w-5" />
-                  Customer Information
+                  <User className="h-5 w-5 text-primary" />
+                  Commission Agent
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="customerId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Customer *</FormLabel>
-                        <Select onValueChange={(value) => {
-                          field.onChange(value);
-                          handleCustomerChange(value);
-                        }} value={field.value}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select customer" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {mockCustomers.map((customer) => (
-                              <SelectItem key={customer.id} value={customer.id}>
-                                <div className="flex items-center gap-2">
-                                  <User className="h-4 w-4" />
-                                  <span>{customer.name}</span>
-                                  <Badge variant="outline" className="text-xs">
-                                    {customer.type}
-                                  </Badge>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                <CommissionAgentSelector
+                  selectedAgentId={selectedCommissionAgentId}
+                  onAgentSelect={setSelectedCommissionAgentId}
+                  totalProfitCents={totalProfit}
+                  totalAmountCents={total}
+                  allowCreate={true}
+                />
+              </Card>
 
-                  {customerId && features?.billingAliases && (
-                    <BillingAliasSelector
-                      customerId={customerId}
-                      selectedAliasId={form.watch('billingAliasId')}
-                      onAliasSelect={(aliasId) => form.setValue('billingAliasId', aliasId)}
-                      allowCreate={true}
-                      allowEdit={true}
-                    />
+              {/* Customer and Billing Information */}
+              <Card className="p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <User className="h-5 w-5 text-primary" />
+                    Customer Information
+                  </h3>
+                  {customerId && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowCustomerDetails(true)}
+                    >
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Customer Details
+                    </Button>
                   )}
-
-                  <FormField
-                    control={form.control}
-                    name="invoiceDate"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Invoice Date</FormLabel>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="customerId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Customer *</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
                         <FormControl>
-                          <Input
-                            type="date"
-                            value={format(field.value, 'yyyy-MM-dd')}
-                            onChange={(e) => field.onChange(new Date(e.target.value))}
-                          />
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select customer" />
+                          </SelectTrigger>
                         </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                        <SelectContent>
+                          {customers.map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              <div className="flex items-center gap-2">
+                                <User className="h-4 w-4" />
+                                <span>{customer.name}</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {customer.type}
+                                </Badge>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                   <FormField
                     control={form.control}
-                    name="dueDate"
+                    name="billingName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Due Date</FormLabel>
+                        <FormLabel>Billing Name</FormLabel>
                         <FormControl>
                           <Input
-                            type="date"
-                            value={field.value ? format(field.value, 'yyyy-MM-dd') : ''}
-                            onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                            placeholder="Enter billing name"
+                            {...field}
                           />
                         </FormControl>
                         <FormMessage />
@@ -430,139 +598,195 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                       </FormItem>
                     )}
                   />
+
+                  {/* Payment Amount */}
+                  <FormField
+                    control={form.control}
+                    name="paymentAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Payment Amount</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <DollarSign className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="0.00"
+                              {...field}
+                              value={field.value ? (field.value / 100).toFixed(2) : ''}
+                              onChange={(e) => field.onChange(parseFloat(e.target.value) * 100 || 0)}
+                              className="pl-8"
+                            />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
               </Card>
 
-              {/* Customer Due History */}
-              {customerId && selectedCustomer && (
-                <CustomerDueHistory
-                  customerId={customerId}
-                  customer={selectedCustomer}
-                  invoices={[]}
-                  payments={[]}
-                />
+              {/* Selected Products Summary */}
+              {lineItems.filter(item => item.productId).length > 0 && (
+                <Card className="p-4 shadow-sm bg-blue-50 border-blue-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold flex items-center gap-2 text-blue-900">
+                      <ShoppingCart className="h-4 w-4" />
+                      Selected Products ({lineItems.filter(item => item.productId).length})
+                    </h3>
+                  </div>
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                    {lineItems
+                      .filter(item => item.productId)
+                      .map((item, idx) => {
+                        const product = products.find(p => p.id === item.productId);
+                        return product ? (
+                          <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded border border-blue-100">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <Package className="h-3 w-3 text-blue-600 flex-shrink-0" />
+                              <span className="text-sm font-medium truncate">{product.name}</span>
+                              {item.variationId && (
+                                <Badge variant="outline" className="text-xs">
+                                  {product.variations.find(v => v.id === item.variationId)?.name}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-shrink-0">
+                              <span>Qty: {item.quantity} pcs</span>
+                              <span className="font-medium">{formatCurrency(item.totalPriceCents)}</span>
+                            </div>
+                          </div>
+                        ) : null;
+                      })}
+                  </div>
+                </Card>
               )}
 
               {/* Line Items */}
-              <Card className="p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold flex items-center gap-2">
-                    <Package className="h-5 w-5" />
-                    Line Items ({lineItems.length})
-                  </h3>
+              <Card className="p-6 shadow-sm">
+                <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                  <Package className="h-5 w-5 text-primary" />
+                  Line Items ({lineItems.length})
+                </h3>
+
+                {/* Table Header */}
+                <div className="grid grid-cols-[2fr_120px_120px_120px_40px] gap-3 mb-2 pb-2 border-b text-sm font-medium text-muted-foreground">
+                  <div>Product</div>
+                  <div className="text-right">Qty (pcs)</div>
+                  <div className="text-right">Price</div>
+                  <div className="text-right">Total</div>
+                  <div></div>
+                </div>
+
+                {/* Line Items List */}
+                <div className="space-y-2  h-auto">
+                  {lineItems.map((item, index) => (
+                    <LineEditor
+                      key={item.id}
+                      lineItem={item}
+                      index={index}
+                      customerId={customerId}
+                      totalLineItems={lineItems.length}
+                      onUpdate={updateLineItem}
+                      onRemove={removeLineItem}
+                      onShowProductDetails={(product) => {
+                        setSelectedProductForDetails(product);
+                        setShowProductDetailsOffcanvas(true);
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* Add Item Button at Bottom */}
+                <div className="mt-4 pt-4 border-t">
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
                     onClick={addNewLineItem}
+                    className="w-full"
                   >
                     <Plus className="h-4 w-4 mr-2" />
                     Add Item
                   </Button>
                 </div>
-
-                <ScrollArea className="max-h-[600px]">
-                  <div className="space-y-4 pr-4">
-                    {lineItems.map((item, index) => (
-                      <LineEditor
-                        key={item.id}
-                        lineItem={item}
-                        index={index}
-                        customerId={customerId}
-                        onUpdate={updateLineItem}
-                        onRemove={removeLineItem}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
               </Card>
 
-              {/* Additional Charges */}
-              <ChargesSelector
-                appliedCharges={additionalCharges}
-                onChargesChange={setAdditionalCharges}
-                lineItemIds={lineItems.map(item => item.id)}
-              />
-
-              {/* Commission Agent */}
-              <Card className="p-4">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <User className="h-5 w-5" />
-                  Commission Agent
+              {/* Additional Charges & Information - Grouped */}
+              <Card className="p-6 shadow-sm">
+                <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-primary" />
+                  Additional Charges & Information
                 </h3>
-                <CommissionAgentSelector
-                  selectedAgentId={selectedCommissionAgentId}
-                  onAgentSelect={setSelectedCommissionAgentId}
-                  totalProfitCents={totalProfit}
-                  totalAmountCents={total}
-                  allowCreate={true}
-                />
-              </Card>
+                
+                <div className="space-y-6">
+                  {/* Additional Charges Section */}
+                  <div className="space-y-4">
+                    <ChargesSelector
+                      appliedCharges={additionalCharges}
+                      onChargesChange={setAdditionalCharges}
+                      lineItemIds={lineItems.map(item => item.id)}
+                      hideCard={true}
+                    />
+                  </div>
 
-              {/* Payment Module */}
-              <PaymentModule
-                invoiceId=""
-                totalAmount={total}
-                paidAmount={paidAmount}
-                dueAmount={dueAmount}
-                onPaymentAdd={(payment) => {
-                  // Handle payment addition
-                  console.log('Payment added:', payment);
-                }}
-                existingPayments={[]}
-              />
+                  <Separator />
 
-              {/* Notes */}
-              <Card className="p-4">
-                <h3 className="text-lg font-semibold mb-4">Additional Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="notes"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Notes</FormLabel>
-                        <FormControl>
-                          <textarea
-                            {...field}
-                            className="w-full p-3 border rounded-md resize-none"
-                            rows={3}
-                            placeholder="Additional notes..."
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {/* Additional Information Section */}
+                  <div className="space-y-4">
+                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                      Additional Information
+                    </h4>
+                    <div className="flex gap-4">
+                      <FormField
+                        control={form.control}
+                        name="notes"
+                        render={({ field }) => (
+                          <FormItem className="flex-1">
+                            <FormLabel>Notes</FormLabel>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                placeholder="Additional notes..."
+                                className="w-full"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
-                  <FormField
-                    control={form.control}
-                    name="terms"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Terms & Conditions</FormLabel>
-                        <FormControl>
-                          <textarea
-                            {...field}
-                            className="w-full p-3 border rounded-md resize-none"
-                            rows={3}
-                            placeholder="Terms and conditions..."
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormField
+                        control={form.control}
+                        name="terms"
+                        render={({ field }) => (
+                          <FormItem className="flex-1">
+                            <FormLabel>Terms & Conditions</FormLabel>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                placeholder="Terms and conditions..."
+                                className="w-full"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
                 </div>
               </Card>
             </div>
 
             {/* Right Column - Summary */}
-            <div className="w-80 flex-shrink-0 flex flex-col gap-4">
-              {/* Totals Card */}
-              <Card className="p-4 sticky top-4">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Calculator className="h-5 w-5" />
+            <div className="w-96 flex-shrink-0">
+              {/* Totals Card - Sticky at top */}
+              <Card className="p-6 shadow-sm bg-white sticky top-6 z-10">
+                <h3 className="text-lg font-semibold mb-6 flex items-center gap-2">
+                  <Calculator className="h-5 w-5 text-primary" />
                   Summary
                 </h3>
                 
@@ -632,6 +856,33 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                     </div>
                   </div>
                 </div>
+                <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handlePreview}
+                disabled={lineItems.length === 0 || !customerId}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                Preview
+              </Button>
+              <Button type="submit" disabled={isSubmitting || lineItems.length === 0 || !customerId}>
+                {isSubmitting ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Sale
+                  </>
+                )}
+              </Button>
+            </div>
               </Card>
             </div>
           </div>
@@ -671,8 +922,8 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                       <div key={item.id} className="flex justify-between text-sm border-b pb-2">
                         <div>
                           <span className="font-medium">Item {index + 1}:</span> {product?.name || item.productId || 'No product selected'}
-                          {item.quantity > 1 && (
-                            <span className="text-muted-foreground"> × {item.quantity}</span>
+                          {item.quantity > 0 && (
+                            <span className="text-muted-foreground"> × {item.quantity} pcs</span>
                           )}
                         </div>
                         <span className="font-medium">
@@ -744,6 +995,21 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Customer Details Modal */}
+      <CustomerDetailsModal
+        customerId={customerId || null}
+        open={showCustomerDetails}
+        onOpenChange={setShowCustomerDetails}
+      />
+
+      {/* Product Details Offcanvas */}
+      <ProductDetailsOffcanvas
+        open={showProductDetailsOffcanvas}
+        onOpenChange={setShowProductDetailsOffcanvas}
+        product={selectedProductForDetails}
+        customerId={customerId}
+      />
     </div>
   );
 }

@@ -1,16 +1,19 @@
 "use client";
 
-import { useState } from 'react';
-import { Plus, DollarSign, Percent, Settings, Trash2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, DollarSign, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useSettingsStore } from '@/store/useSettingsStore';
-import { AdditionalCharge, AppliedAdditionalCharge } from '@/types';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '@/lib/convex';
+import { useSession } from 'next-auth/react';
+import { useToast } from '@/hooks/use-toast';
+import { AppliedAdditionalCharge } from '@/types';
 import { cn } from '@/lib/utils';
 
 interface ChargesSelectorProps {
@@ -18,22 +21,30 @@ interface ChargesSelectorProps {
   onChargesChange: (charges: AppliedAdditionalCharge[]) => void;
   lineItemIds?: string[]; // For per-line charges
   className?: string;
+  hideCard?: boolean; // If true, don't render Card wrapper
 }
 
 export function ChargesSelector({ 
   appliedCharges, 
   onChargesChange, 
   lineItemIds,
-  className 
+  className,
+  hideCard = false
 }: ChargesSelectorProps) {
-  const [showAddCharge, setShowAddCharge] = useState(false);
-  const [selectedChargeType, setSelectedChargeType] = useState<'per_line' | 'global'>('global');
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+  const { toast } = useToast();
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newChargeName, setNewChargeName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
   
-  const { additionalCharges, getActiveAdditionalCharges, getPerLineCharges, getGlobalCharges } = useSettingsStore();
+  // Fetch additional charges from backend
+  const charges = useQuery(
+    api.queries.additionalCharges.getAdditionalCharges,
+    userEmail ? { userEmail } : "skip"
+  );
   
-  const availableCharges = getActiveAdditionalCharges();
-  const perLineCharges = getPerLineCharges();
-  const globalCharges = getGlobalCharges();
+  const createCharge = useMutation(api.mutations.additionalCharges.createAdditionalCharge);
   
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -42,213 +53,219 @@ export function ChargesSelector({
     }).format(amount / 100);
   };
 
-  const handleChargeToggle = (chargeId: string, enabled: boolean) => {
-    if (enabled) {
-      // Add charge
-      const charge = availableCharges.find(c => c.id === chargeId);
-      if (charge) {
-        const newCharge: AppliedAdditionalCharge = {
-          id: `applied-${Date.now()}`,
-          invoiceId: '', // Will be set when invoice is created
-          additionalChargeId: chargeId,
-          name: charge.name,
-          type: charge.type,
-          value: charge.value,
-          applyTo: selectedChargeType,
-          amountCents: 0, // Will be calculated based on context
-          isTaxable: charge.isTaxable,
-          lineItemIds: selectedChargeType === 'per_line' ? lineItemIds : undefined,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          createdBy: 'current-user', // Will be set from auth
-          updatedBy: 'current-user',
-        };
-        
-        onChargesChange([...appliedCharges, newCharge]);
-      }
-    } else {
-      // Remove charge
-      onChargesChange(appliedCharges.filter(c => c.additionalChargeId !== chargeId));
+  const handleCreateCharge = async () => {
+    if (!newChargeName.trim()) {
+      toast({
+        title: "Error",
+        description: "Charge name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      await createCharge({
+        name: newChargeName.trim(),
+        userEmail: userEmail || undefined,
+      });
+      
+      toast({
+        title: "Success",
+        description: "Additional charge created successfully",
+      });
+      
+      setNewChargeName('');
+      setShowCreateDialog(false);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create charge",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
     }
   };
 
-  const handleChargeValueChange = (chargeId: string, newValue: number) => {
+  const handleAddCharge = (chargeId: string, chargeName: string) => {
+    // Check if charge is already applied
+    if (appliedCharges.some(c => c.additionalChargeId === chargeId)) {
+      return;
+    }
+
+    const newCharge: AppliedAdditionalCharge = {
+      id: `applied-${Date.now()}`,
+      invoiceId: '',
+      additionalChargeId: chargeId,
+      name: chargeName,
+      type: 'fixed', // Default to fixed, user will set amount
+      value: 0,
+      applyTo: 'global',
+      amountCents: 0, // User will set this
+      isTaxable: false,
+      lineItemIds: undefined,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: 'current-user',
+      updatedBy: 'current-user',
+    };
+    
+    onChargesChange([...appliedCharges, newCharge]);
+  };
+
+  const handleRemoveCharge = (chargeId: string) => {
+    onChargesChange(appliedCharges.filter(c => c.id !== chargeId));
+  };
+
+  const handleAmountChange = (chargeId: string, amount: number) => {
     onChargesChange(
       appliedCharges.map(charge =>
         charge.id === chargeId
-          ? { ...charge, value: newValue }
+          ? { ...charge, amountCents: Math.round(amount * 100) } // Convert to cents
           : charge
       )
     );
-  };
-
-  const calculateChargeAmount = (charge: AppliedAdditionalCharge, subtotal: number) => {
-    if (charge.type === 'percentage') {
-      return Math.round(subtotal * (charge.value / 100));
-    } else {
-      return Math.round(charge.value * 100); // Convert dollars to cents
-    }
   };
 
   const getTotalCharges = () => {
     return appliedCharges.reduce((sum, charge) => sum + charge.amountCents, 0);
   };
 
-  const ChargeIcon = ({ type }: { type: 'percentage' | 'fixed' }) => {
-    return type === 'percentage' ? 
-      <Percent className="h-4 w-4" /> : 
-      <DollarSign className="h-4 w-4" />;
-  };
+  const availableCharges = charges?.filter(c => c.isActive) || [];
+  const appliedChargeIds = appliedCharges.map(c => c.additionalChargeId);
 
-  return (
-    <Card className={cn("p-4", className)}>
-      <div className="space-y-4">
-        {/* Header */}
+  const content = (
+    <div className={cn("space-y-4", !hideCard && "p-6")}>
+      {/* Header */}
+      {!hideCard && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-primary" />
             <h3 className="font-semibold">Additional Charges</h3>
-          </div>
-          
-          <div className="flex items-center gap-2">
             <Badge variant="outline">
               Total: {formatCurrency(getTotalCharges())}
             </Badge>
-            
-            <Popover open={showAddCharge} onOpenChange={setShowAddCharge}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Charge
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[300px] p-0">
-                <div className="p-4 space-y-3">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Charge Type</label>
-                    <Select value={selectedChargeType} onValueChange={(value: any) => setSelectedChargeType(value)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="global">Global (Invoice Level)</SelectItem>
-                        <SelectItem value="per_line">Per Line Item</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Available Charges</label>
-                    <div className="space-y-1 max-h-[200px] overflow-y-auto">
-                      {selectedChargeType === 'per_line' ? (
-                        perLineCharges.map((charge) => (
-                          <div
-                            key={charge.id}
-                            className={cn(
-                              "flex items-center justify-between p-2 rounded border cursor-pointer hover:bg-accent/50",
-                              appliedCharges.some(c => c.additionalChargeId === charge.id) && "bg-accent"
-                            )}
-                            onClick={() => handleChargeToggle(charge.id, !appliedCharges.some(c => c.additionalChargeId === charge.id))}
-                          >
-                            <div className="flex items-center gap-2">
-                              <ChargeIcon type={charge.type} />
-                              <div>
-                                <div className="font-medium text-sm">{charge.name}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {charge.type === 'percentage' ? `${charge.value}%` : formatCurrency(charge.value * 100)}
-                                </div>
-                              </div>
-                            </div>
-                            <Switch
-                              checked={appliedCharges.some(c => c.additionalChargeId === charge.id)}
-                              onChange={() => {}} // Handled by parent click
-                            />
-                          </div>
-                        ))
-                      ) : (
-                        globalCharges.map((charge) => (
-                          <div
-                            key={charge.id}
-                            className={cn(
-                              "flex items-center justify-between p-2 rounded border cursor-pointer hover:bg-accent/50",
-                              appliedCharges.some(c => c.additionalChargeId === charge.id) && "bg-accent"
-                            )}
-                            onClick={() => handleChargeToggle(charge.id, !appliedCharges.some(c => c.additionalChargeId === charge.id))}
-                          >
-                            <div className="flex items-center gap-2">
-                              <ChargeIcon type={charge.type} />
-                              <div>
-                                <div className="font-medium text-sm">{charge.name}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {charge.type === 'percentage' ? `${charge.value}%` : formatCurrency(charge.value * 100)}
-                                </div>
-                              </div>
-                            </div>
-                            <Switch
-                              checked={appliedCharges.some(c => c.additionalChargeId === charge.id)}
-                              onChange={() => {}} // Handled by parent click
-                            />
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
           </div>
+          
+          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Charge
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create Additional Charge</DialogTitle>
+                <DialogDescription>
+                  Create a new additional charge. You'll set the amount when applying it.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Charge Name *</Label>
+                  <Input
+                    placeholder="e.g., Delivery Fee, Service Charge"
+                    value={newChargeName}
+                    onChange={(e) => setNewChargeName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleCreateCharge();
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleCreateCharge} disabled={isCreating || !newChargeName.trim()}>
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Create"
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
+
+      {/* Add Charge Selector */}
+        <div className="space-y-2">
+          <Label>Select Charge to Add</Label>
+          <Select
+            value=""
+            onValueChange={(value) => {
+              const charge = availableCharges.find(c => c._id === value);
+              if (charge) {
+                handleAddCharge(charge._id, charge.name);
+              }
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select a charge to add" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableCharges
+                .filter(c => !appliedChargeIds.includes(c._id))
+                .map((charge) => (
+                  <SelectItem key={charge._id} value={charge._id}>
+                    {charge.name}
+                  </SelectItem>
+                ))}
+              {availableCharges.filter(c => !appliedChargeIds.includes(c._id)).length === 0 && (
+                <div className="p-2 text-sm text-muted-foreground text-center">
+                  No available charges. Create one to get started.
+                </div>
+              )}
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Applied Charges */}
+        {/* Applied Charges - Single Row Layout */}
         {appliedCharges.length > 0 && (
           <div className="space-y-2">
-            <label className="text-sm font-medium">Applied Charges</label>
+            <Label>Applied Charges</Label>
             <div className="space-y-2">
-              {appliedCharges.map((charge) => (
-                <Card key={charge.id} className="p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <ChargeIcon type={charge.type} />
-                      <div>
-                        <div className="font-medium">{charge.name}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {charge.applyTo === 'per_line' ? 'Per Line' : 'Global'} • 
-                          {charge.type === 'percentage' ? `${charge.value}%` : formatCurrency(charge.value * 100)}
-                        </div>
-                      </div>
+              {appliedCharges.map((charge) => {
+                const chargeData = availableCharges.find(c => c._id === charge.additionalChargeId);
+                return (
+                  <div key={charge.id} className="flex items-center gap-3 p-2 border rounded-lg bg-white">
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="font-medium text-sm">{charge.name}</div>
                     </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">
-                        {formatCurrency(charge.amountCents)}
-                      </Badge>
-                      
+                    <div className="flex items-center gap-2 w-32">
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={(charge.amountCents / 100).toFixed(2)}
+                        onChange={(e) => handleAmountChange(charge.id, parseFloat(e.target.value) || 0)}
+                        className="text-right"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div className="w-10 flex justify-center">
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => onChargesChange(appliedCharges.filter(c => c.id !== charge.id))}
+                        onClick={() => handleRemoveCharge(charge.id)}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
-                  
-                  {charge.type === 'percentage' && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                        value={charge.value}
-                        onChange={(e) => handleChargeValueChange(charge.id, parseFloat(e.target.value) || 0)}
-                        className="w-20 text-sm"
-                      />
-                      <span className="text-sm text-muted-foreground">%</span>
-                    </div>
-                  )}
-                </Card>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -257,10 +274,19 @@ export function ChargesSelector({
           <div className="text-center py-8 text-muted-foreground">
             <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">No additional charges applied</p>
-            <p className="text-xs mt-1">Click "Add Charge" to apply charges</p>
+            <p className="text-xs mt-1">Select a charge above to add it</p>
           </div>
         )}
       </div>
+  );
+
+  if (hideCard) {
+    return <div className={className}>{content}</div>;
+  }
+
+  return (
+    <Card className={cn("p-6 shadow-sm", className)}>
+      {content}
     </Card>
   );
 }

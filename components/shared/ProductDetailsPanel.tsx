@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from 'react';
-import { Package, Ruler, DollarSign, Clock, Image as ImageIcon, Info } from 'lucide-react';
+import { Package, Ruler, DollarSign, Clock, Image as ImageIcon, Info, Tag, Box, TrendingUp, AlertCircle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useProductStore } from '@/store/useProductStore';
@@ -28,7 +26,6 @@ export function ProductDetailsPanel({
   className 
 }: ProductDetailsPanelProps) {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [selectedTab, setSelectedTab] = useState('details');
   
   const { priceHistory, priceAgreements, getPriceHistoryForCustomer } = useProductStore();
 
@@ -42,6 +39,9 @@ export function ProductDetailsPanel({
     ag => ag.productId === product.id && ag.isActive
   );
 
+  // Get base unit
+  const baseUnit = product.units.find(u => u.isBaseUnit || u.unit === product.baseUnit) || product.units[0];
+
   const formatPrice = (price: number, currency = 'USD') => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -54,290 +54,355 @@ export function ProductDetailsPanel({
     
     if (product.stockQuantity === 0) return { status: 'out', text: 'Out of Stock', color: 'destructive' };
     if (product.stockQuantity <= product.minStockLevel) return { status: 'low', text: 'Low Stock', color: 'warning' };
-    return { status: 'in', text: `${product.stockQuantity} in stock`, color: 'success' };
+    return { status: 'in', text: `${product.stockQuantity} pcs in stock`, color: 'success' };
   };
 
   const stockStatus = getStockStatus();
 
   return (
-    <Card className={cn("p-4", className)}>
-      <div className="space-y-4">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold text-lg">{product.name}</h3>
-              {stockStatus && (
-                <Badge variant={stockStatus.color as any}>
-                  {stockStatus.text}
-                </Badge>
-              )}
+    <ScrollArea className={cn("h-full", className)}>
+      <div className="p-6 space-y-6">
+        {/* Header Section */}
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2 flex-1">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Package className="h-6 w-6 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <h2 className="text-2xl font-bold">{product.name}</h2>
+                  {variation && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Variation: <span className="font-medium">{variation.name}</span>
+                    </p>
+                  )}
+                </div>
+                {stockStatus && (
+                  <Badge variant={stockStatus.color as any} className="text-sm px-3 py-1">
+                    {stockStatus.text}
+                  </Badge>
+                )}
+              </div>
+              
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  <Tag className="h-4 w-4" />
+                  <span>SKU: <span className="font-medium text-foreground">{variation?.sku || product.sku}</span></span>
+                </div>
+                {product.barcode && (
+                  <div className="flex items-center gap-1">
+                    <Box className="h-4 w-4" />
+                    <span>Barcode: <span className="font-medium text-foreground">{product.barcode}</span></span>
+                  </div>
+                )}
+              </div>
             </div>
-            {variation && (
-              <div className="text-sm text-muted-foreground">
-                Variation: {variation.name}
+            
+            {baseUnit && (
+              <div className="text-right bg-accent/50 p-4 rounded-lg">
+                <div className="text-3xl font-bold text-primary">
+                  {formatPrice(baseUnit.price)}
+                </div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  per pcs
+                </div>
               </div>
             )}
-            <div className="text-sm text-muted-foreground">
-              SKU: {variation?.sku || product.sku}
+          </div>
+
+          {/* Images */}
+          {product.images.length > 0 && (
+            <div className="space-y-3">
+              <div className="aspect-square bg-muted rounded-lg overflow-hidden border-2">
+                <img
+                  src={product.images[selectedImageIndex]}
+                  alt={product.name}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDIwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMDAgMTAwTDEyMCA4MEwxNDAgMTAwTDEyMCAxMjBMMTAwIDEwMFoiIGZpbGw9IiM5Q0EzQUYiLz4KPC9zdmc+';
+                  }}
+                />
+              </div>
+              
+              {product.images.length > 1 && (
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {product.images.map((image, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setSelectedImageIndex(index)}
+                      className={cn(
+                        "flex-shrink-0 w-20 h-20 rounded-lg border-2 overflow-hidden transition-all",
+                        selectedImageIndex === index ? "border-primary ring-2 ring-primary/20" : "border-muted opacity-60 hover:opacity-100"
+                      )}
+                    >
+                      <img
+                        src={image}
+                        alt={`${product.name} ${index + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* Description */}
+        {product.description && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Info className="h-4 w-4 text-muted-foreground" />
+              <h3 className="font-semibold">Description</h3>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">{product.description}</p>
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Pricing Information */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold text-lg">Pricing Information</h3>
           </div>
           
-          {unit && (
-            <div className="text-right">
-              <div className="text-2xl font-bold">
-                {formatPrice(unit.price)}
+          {baseUnit && (
+            <div className="grid grid-cols-2 gap-4">
+              <Card className="p-4 bg-accent/30">
+                <div className="text-sm text-muted-foreground mb-1">Selling Price</div>
+                <div className="text-2xl font-bold text-primary">{formatPrice(baseUnit.price)}</div>
+                <div className="text-xs text-muted-foreground mt-1">per pcs</div>
+              </Card>
+              <Card className="p-4 bg-accent/30">
+                <div className="text-sm text-muted-foreground mb-1">Cost Price</div>
+                <div className="text-2xl font-bold">{formatPrice(baseUnit.cost)}</div>
+                <div className="text-xs text-muted-foreground mt-1">per pcs</div>
+              </Card>
+            </div>
+          )}
+
+          {baseUnit && (
+            <Card className="p-4 bg-green-50 border-green-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-green-600" />
+                  <span className="font-medium">Profit Margin</span>
+                </div>
+                <div className="text-2xl font-bold text-green-600">
+                  {((baseUnit.price - baseUnit.cost) / baseUnit.price * 100).toFixed(1)}%
+                </div>
               </div>
-              <div className="text-sm text-muted-foreground">
-                per {unit.unit}
+              <div className="text-sm text-muted-foreground mt-2">
+                Profit: {formatPrice(baseUnit.price - baseUnit.cost)} per pcs
+              </div>
+            </Card>
+          )}
+
+          {/* Price Agreements */}
+          {relevantAgreements.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Ruler className="h-4 w-4 text-muted-foreground" />
+                <h4 className="font-medium">Price Agreements</h4>
+              </div>
+              <div className="space-y-2">
+                {relevantAgreements.map((agreement) => (
+                  <Card key={agreement.id} className="p-3 border-l-4 border-l-primary">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">Minimum Price: {formatPrice(agreement.minUnitPriceCents)}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Unit: {agreement.unit} • {agreement.isActive ? 'Active' : 'Inactive'}
+                        </div>
+                      </div>
+                      <Badge variant={agreement.isActive ? 'default' : 'secondary'}>
+                        {agreement.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+                  </Card>
+                ))}
               </div>
             </div>
           )}
         </div>
 
-        {/* Images */}
-        {product.images.length > 0 && (
-          <div className="space-y-2">
-            <div className="aspect-square bg-muted rounded-lg overflow-hidden">
-              <img
-                src={product.images[selectedImageIndex]}
-                alt={product.name}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDIwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMDAgMTAwTDEyMCA4MEwxNDAgMTAwTDEyMCAxMjBMMTAwIDEwMFoiIGZpbGw9IiM5Q0EzQUYiLz4KPC9zdmc+';
-                }}
-              />
+        <Separator />
+
+        {/* Inventory Information */}
+        {product.trackInventory && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Box className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold text-lg">Inventory</h3>
             </div>
             
-            {product.images.length > 1 && (
-              <div className="flex gap-2 overflow-x-auto">
-                {product.images.map((image, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setSelectedImageIndex(index)}
-                    className={cn(
-                      "flex-shrink-0 w-16 h-16 rounded border-2 overflow-hidden",
-                      selectedImageIndex === index ? "border-primary" : "border-muted"
-                    )}
-                  >
-                    <img
-                      src={image}
-                      alt={`${product.name} ${index + 1}`}
-                      className="w-full h-full object-cover"
-                    />
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-3 gap-4">
+              <Card className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Current Stock</div>
+                <div className="text-2xl font-bold">{product.stockQuantity}</div>
+                <div className="text-xs text-muted-foreground mt-1">pcs</div>
+              </Card>
+              <Card className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Min Level</div>
+                <div className="text-2xl font-bold text-orange-600">{product.minStockLevel}</div>
+                <div className="text-xs text-muted-foreground mt-1">pcs</div>
+              </Card>
+              <Card className="p-4 text-center">
+                <div className="text-sm text-muted-foreground mb-1">Max Level</div>
+                <div className="text-2xl font-bold text-blue-600">{product.maxStockLevel}</div>
+                <div className="text-xs text-muted-foreground mt-1">pcs</div>
+              </Card>
+            </div>
+
+            {product.stockQuantity <= product.minStockLevel && (
+              <Card className="p-3 bg-orange-50 border-orange-200">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-orange-600" />
+                  <span className="text-sm font-medium text-orange-900">
+                    Stock is below minimum level
+                  </span>
+                </div>
+              </Card>
             )}
           </div>
         )}
 
-        {/* Tabs */}
-        <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="details">Details</TabsTrigger>
-            <TabsTrigger value="pricing">Pricing</TabsTrigger>
-            <TabsTrigger value="units">Units</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-          </TabsList>
+        <Separator />
 
-          <TabsContent value="details" className="space-y-3">
-            {product.description && (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Info className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Description</span>
-                </div>
-                <p className="text-sm text-muted-foreground">{product.description}</p>
-              </div>
-            )}
-
-            {product.brand && (
-              <div>
-                <span className="font-medium">Brand:</span> {product.brand}
-              </div>
-            )}
-
-            <div>
-              <span className="font-medium">Category:</span> {product.categoryId}
+        {/* Units Information */}
+        {product.units.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Ruler className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold text-lg">Available Units</h3>
             </div>
-
-            <div>
-              <span className="font-medium">Track Inventory:</span>{' '}
-              <Badge variant={product.trackInventory ? 'default' : 'secondary'}>
-                {product.trackInventory ? 'Yes' : 'No'}
-              </Badge>
-            </div>
-
-            {product.trackInventory && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className="font-medium">Min Stock Level:</span> {product.minStockLevel}
-                </div>
-                <div>
-                  <span className="font-medium">Max Stock Level:</span> {product.maxStockLevel}
-                </div>
-              </div>
-            )}
-
-            {product.barcode && (
-              <div>
-                <span className="font-medium">Barcode:</span> {product.barcode}
-              </div>
-            )}
-
-            {variation?.barcode && (
-              <div>
-                <span className="font-medium">Variation Barcode:</span> {variation.barcode}
-              </div>
-            )}
-
-            {variation && Object.keys(variation.attributes).length > 0 && (
-              <div>
-                <div className="font-medium mb-2">Variation Attributes</div>
-                <div className="space-y-1">
-                  {Object.entries(variation.attributes).map(([key, value]) => (
-                    <div key={key} className="text-sm">
-                      <span className="text-muted-foreground">{key}:</span> {value}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="pricing" className="space-y-3">
-            {unit && (
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">Current Pricing</span>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>Selling Price:</span>
-                      <span className="font-medium">{formatPrice(unit.price)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Cost Price:</span>
-                      <span className="font-medium">{formatPrice(unit.cost)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Profit Margin:</span>
-                      <span className="font-medium">
-                        {((unit.price - unit.cost) / unit.price * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {relevantAgreements.length > 0 && (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Ruler className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">Price Agreements</span>
-                </div>
-                <div className="space-y-2">
-                  {relevantAgreements.map((agreement) => (
-                    <Card key={agreement.id} className="p-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">Min Price: {formatPrice(agreement.minUnitPriceCents)}</div>
-                          <div className="text-xs text-muted-foreground">
-                            Unit: {agreement.unit}
-                          </div>
-                        </div>
-                        <Badge variant="outline">
-                          {agreement.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="units" className="space-y-3">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Ruler className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">Available Units</span>
-              </div>
-              <div className="space-y-2">
-                {product.units.map((productUnit) => (
-                  <Card key={productUnit.id} className={cn("p-3", unit?.id === productUnit.id && "border-primary")}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{productUnit.unit}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {productUnit.conversionFactor > 1 && `${productUnit.conversionFactor} base units`}
-                          {productUnit.isBaseUnit && ' (Base Unit)'}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-medium">{formatPrice(productUnit.price)}</div>
-                        <div className="text-sm text-muted-foreground">
-                          Cost: {formatPrice(productUnit.cost)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {productUnit.barcode && (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        Barcode: {productUnit.barcode}
-                      </div>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="history" className="space-y-3">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">
-                  {customerId ? 'Customer Price History' : 'Recent Sales'}
-                </span>
-              </div>
-              
-              {customerPriceHistory.length > 0 ? (
-                <div className="space-y-2">
-                  {customerPriceHistory.map((entry, index) => (
-                    <Card key={index} className="p-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">{formatPrice(entry.unitPriceCents)}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {entry.invoiceDate.toLocaleDateString()} • Qty: {entry.quantity}
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-xs">
-                          {entry.unit}
-                        </Badge>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center text-muted-foreground py-8">
-                  <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No price history available</p>
-                  {customerId && (
-                    <p className="text-xs mt-1">No previous sales to this customer</p>
+            <div className="space-y-2">
+              {product.units.map((productUnit) => (
+                <Card 
+                  key={productUnit.id} 
+                  className={cn(
+                    "p-4 transition-all",
+                    productUnit.isBaseUnit && "border-2 border-primary bg-primary/5"
                   )}
-                </div>
-              )}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-lg">{productUnit.unit}</span>
+                        {productUnit.isBaseUnit && (
+                          <Badge variant="default" className="text-xs">Base Unit</Badge>
+                        )}
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {productUnit.conversionFactor > 1 && (
+                          <span>{productUnit.conversionFactor} base units</span>
+                        )}
+                        {productUnit.barcode && (
+                          <span className="ml-2">Barcode: {productUnit.barcode}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold">{formatPrice(productUnit.price)}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Cost: {formatPrice(productUnit.cost)}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
             </div>
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Variation Attributes */}
+        {variation && Object.keys(variation.attributes).length > 0 && (
+          <div className="space-y-2">
+            <h3 className="font-semibold text-lg">Variation Attributes</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {Object.entries(variation.attributes).map(([key, value]) => (
+                <Card key={key} className="p-3">
+                  <div className="text-xs text-muted-foreground mb-1">{key}</div>
+                  <div className="font-medium">{value}</div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Price History */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Clock className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold text-lg">
+              {customerId ? 'Customer Price History' : 'Recent Sales History'}
+            </h3>
+          </div>
+          
+          {customerPriceHistory.length > 0 ? (
+            <div className="space-y-2">
+              {customerPriceHistory.slice(0, 5).map((entry, index) => (
+                <Card key={index} className="p-3 hover:bg-accent/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-lg">{formatPrice(entry.unitPriceCents)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {entry.invoiceDate.toLocaleDateString()} • Qty: {entry.quantity} pcs
+                      </div>
+                    </div>
+                    <Badge variant="outline">pcs</Badge>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card className="p-8 text-center">
+              <Clock className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+              <p className="text-sm font-medium text-muted-foreground">No price history available</p>
+              {customerId && (
+                <p className="text-xs text-muted-foreground mt-1">No previous sales to this customer</p>
+              )}
+            </Card>
+          )}
+        </div>
+
+        {/* Additional Info */}
+        <Separator />
+        
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          {product.brand && (
+            <div>
+              <span className="text-muted-foreground">Brand:</span>
+              <span className="font-medium ml-2">{product.brand}</span>
+            </div>
+          )}
+          <div>
+            <span className="text-muted-foreground">Category:</span>
+            <span className="font-medium ml-2">{product.categoryId || 'N/A'}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Track Inventory:</span>
+            <Badge variant={product.trackInventory ? 'default' : 'secondary'} className="ml-2">
+              {product.trackInventory ? 'Yes' : 'No'}
+            </Badge>
+          </div>
+          {variation?.barcode && (
+            <div>
+              <span className="text-muted-foreground">Variation Barcode:</span>
+              <span className="font-medium ml-2">{variation.barcode}</span>
+            </div>
+          )}
+        </div>
       </div>
-    </Card>
+    </ScrollArea>
   );
 }

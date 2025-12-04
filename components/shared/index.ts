@@ -1,6 +1,7 @@
 export * from './ProductSelector';
 export * from './ProductDetailsPanel';
 export * from './PriceHistoryPopover';
+export * from './PriceQuantityHistory';
 export * from './LineEditor';
 export * from './ChargesSelector';
 export * from './BillingAliasSelector';
@@ -9,6 +10,8 @@ export * from './AuditTimeline';
 export * from './DataTable';
 export * from './UnifiedDataTable';
 export * from './CustomerDueHistory';
+export * from './CustomerDetailsModal';
+export * from './ProductDetailsOffcanvas';
 export * from './PaymentModule';
 export * from './SaleReturn';
 export * from './UnitManagement';

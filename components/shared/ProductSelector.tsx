@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { Search, Package, ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
+import { Search, Package, ChevronDown, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -27,8 +27,13 @@ export function ProductSelector({
 }: ProductSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
+
+  // Reset search when dropdown closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery('');
+    }
+  }, [isOpen]);
   
   const {
     products,
@@ -54,18 +59,6 @@ export function ProductSelector({
   // Get filtered products from store
   const filteredProducts = getFilteredProducts();
 
-  // Get unique categories from products
-  const categories = ['all', ...Array.from(new Set(products.map(p => p.categoryId)))];
-
-  const toggleProductExpansion = (productId: string) => {
-    const newExpanded = new Set(expandedProducts);
-    if (newExpanded.has(productId)) {
-      newExpanded.delete(productId);
-    } else {
-      newExpanded.add(productId);
-    }
-    setExpandedProducts(newExpanded);
-  };
 
   const handleProductSelect = (product: Product, variation?: ProductVariation, unit?: ProductUnit) => {
     selectProduct(product);
@@ -110,7 +103,6 @@ export function ProductSelector({
             <span>
               {selectedProduct.name}
               {selectedVariation && ` - ${selectedVariation.name}`}
-              {selectedUnit && ` (${selectedUnit.unit})`}
             </span>
           </div>
         ) : (
@@ -126,26 +118,29 @@ export function ProductSelector({
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search products..."
+                placeholder="Search products by name, SKU, or description..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Prevent dropdown from closing on Enter
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                  }
+                }}
                 className="pl-8"
+                autoFocus
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-2.5 h-4 w-4 text-muted-foreground hover:text-foreground"
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
-            {/* Category Filter */}
-            <div className="flex gap-2 flex-wrap">
-              {categories.map((category) => (
-                <Badge
-                  key={category}
-                  variant={selectedCategory === category ? 'default' : 'outline'}
-                  className="cursor-pointer"
-                  onClick={() => setSelectedCategory(category)}
-                >
-                  {category === 'all' ? 'All Categories' : category}
-                </Badge>
-              ))}
-            </div>
 
             {/* Quick Add Button */}
             <Button
@@ -164,45 +159,83 @@ export function ProductSelector({
 
           <Separator />
 
-          <ScrollArea className="max-h-[400px]">
-            <div className="p-2 space-y-1">
-              {filteredProducts.length === 0 ? (
-                <div className="text-center text-muted-foreground py-8">
-                  No products found
+          <ScrollArea className="max-h-[500px]">
+            <div className="p-2">
+              {products.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12">
+                  <Package className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm font-medium">No products available</p>
+                  <p className="text-xs mt-1">Add products to get started</p>
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12">
+                  <Search className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm font-medium">No products found</p>
+                  <p className="text-xs mt-1">Try adjusting your search</p>
                 </div>
               ) : (
-                filteredProducts.map((product) => {
-                  const stockStatus = getStockStatus(product);
-                  const isExpanded = expandedProducts.has(product.id);
-                  const isSelected = selectedProduct?.id === product.id;
+                <div className="grid grid-cols-1 gap-2">
+                  {filteredProducts.map((product) => {
+                    const stockStatus = getStockStatus(product);
+                    const isSelected = selectedProduct?.id === product.id;
+                    const baseUnit = product.units.find(u => u.unit === product.baseUnit || u.isBaseUnit) || product.units[0];
+                    const basePrice = baseUnit?.price || 0;
 
-                  return (
-                    <div key={product.id}>
+                    return (
                       <Card
+                        key={product.id}
                         className={cn(
-                          "p-3 cursor-pointer hover:bg-accent/50 transition-colors",
-                          isSelected && "border-primary bg-accent"
+                          "p-4 cursor-pointer hover:shadow-md transition-all border-2 group",
+                          isSelected && "border-primary bg-primary/5 shadow-md"
                         )}
-                        onClick={() => toggleProductExpansion(product.id)}
+                        onClick={() => {
+                          // Select product directly - use base unit automatically
+                          handleProductSelect(product, undefined, baseUnit);
+                        }}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <ChevronRight
-                              className={cn(
-                                "h-4 w-4 transition-transform",
-                                isExpanded && "rotate-90"
-                              )}
-                            />
-                            <Package className="h-4 w-4" />
-                            <div>
-                              <div className="font-medium">{product.name}</div>
-                              <div className="text-sm text-muted-foreground">
-                                SKU: {product.sku}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <div className={cn(
+                              "p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors",
+                              isSelected && "bg-primary/20"
+                            )}>
+                              <Package className={cn(
+                                "h-5 w-5",
+                                isSelected ? "text-primary" : "text-primary/70"
+                              )} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className={cn(
+                                "font-semibold truncate mb-1",
+                                isSelected && "text-primary"
+                              )}>
+                                {product.name}
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
+                                <span>SKU: {product.sku}</span>
+                                {product.description && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="truncate">{product.description}</span>
+                                  </>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {basePrice > 0 && (
+                                  <Badge variant="outline" className="text-xs font-medium">
+                                    ${(basePrice / 100).toFixed(2)} / pcs
+                                  </Badge>
+                                )}
+                                {product.trackInventory && (
+                                  <Badge variant="outline" className="text-xs">
+                                    Stock: {product.stockQuantity} pcs
+                                  </Badge>
+                                )}
                               </div>
                             </div>
                           </div>
                           
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-col items-end gap-2 flex-shrink-0">
                             {stockStatus && (
                               <Badge
                                 variant={
@@ -214,79 +247,17 @@ export function ProductSelector({
                                 {stockStatus.text}
                               </Badge>
                             )}
-                            <Badge variant="outline" className="text-xs">
-                              {product.units.length} units
-                            </Badge>
+                            {product.variations.length > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                {product.variations.length} var{product.variations.length !== 1 ? 's' : ''}
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </Card>
-
-                      {isExpanded && (
-                        <div className="ml-6 mt-1 space-y-1">
-                          {/* Variations */}
-                          {product.variations.length > 0 && (
-                            <div className="space-y-1">
-                              <div className="text-xs font-medium text-muted-foreground px-3">
-                                Variations
-                              </div>
-                              {product.variations.map((variation) => (
-                                <Card
-                                  key={variation.id}
-                                  className="ml-4 p-2 cursor-pointer hover:bg-accent/30"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleProductSelect(product, variation);
-                                  }}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">{variation.name}</span>
-                                    <Badge variant="outline" className="text-xs">
-                                      {variation.sku}
-                                    </Badge>
-                                  </div>
-                                </Card>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Units */}
-                          <div className="space-y-1">
-                            <div className="text-xs font-medium text-muted-foreground px-3">
-                              Units & Pricing
-                            </div>
-                            {product.units.map((unit) => (
-                              <Card
-                                key={unit.id}
-                                className="ml-4 p-2 cursor-pointer hover:bg-accent/30"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleProductSelect(product, undefined, unit);
-                                }}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div>
-                                    <div className="text-sm font-medium">{unit.unit}</div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {unit.conversionFactor > 1 && `${unit.conversionFactor} base units`}
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-sm font-medium">
-                                      {formatPrice(unit.price, unit.unit)}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      Cost: {formatPrice(unit.cost, unit.unit)}
-                                    </div>
-                                  </div>
-                                </div>
-                              </Card>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )}
             </div>
           </ScrollArea>

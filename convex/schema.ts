@@ -236,6 +236,46 @@ export default defineSchema({
     .index("by_timestamp", ["timestamp"])
     .index("by_action", ["action"]),
 
+  // Comprehensive audit logs for all entity changes
+  auditLogs: defineTable({
+    organizationId: v.id("organizations"),
+    userId: v.id("users"), // User who performed the action
+    userName: v.string(), // User name for quick access
+    action: v.union(
+      v.literal("create"),
+      v.literal("update"),
+      v.literal("delete"),
+      v.literal("approve"),
+      v.literal("cancel"),
+      v.literal("lock"),
+      v.literal("unlock"),
+      v.literal("return"),
+      v.literal("payment")
+    ),
+    entityType: v.string(), // "product", "brand", "category", "unit", "customer", "sale", "purchase", "invoice", etc.
+    entityId: v.string(), // ID of the entity (can be Convex ID or string)
+    changes: v.array(
+      v.object({
+        field: v.string(),
+        oldValue: v.optional(v.any()), // Optional - null for creates, undefined for updates without old value
+        newValue: v.optional(v.any()), // Optional - null for deletes, undefined for updates without new value
+        dataType: v.string(), // "string", "number", "boolean", "object", "array", etc.
+      })
+    ),
+    metadata: v.optional(v.any()), // Additional metadata (IP address, user agent, reason, etc.)
+    ipAddress: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
+    timestamp: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_user", ["userId"])
+    .index("by_timestamp", ["timestamp"])
+    .index("by_action", ["action"])
+    .index("by_entity", ["entityType", "entityId"])
+    .index("by_organization_timestamp", ["organizationId", "timestamp"]),
+
   // Brands table (pharmacy-specific)
   brands: defineTable({
     organizationId: v.id("organizations"),
@@ -332,6 +372,7 @@ export default defineSchema({
     // Pricing (in smallest unit - cents)
     salePrice: v.number(), // Sale price per smallest unit
     purchasePrice: v.number(), // Purchase price per smallest unit
+    fakePrice: v.optional(v.boolean()), // Fake price flag
     
     // Stock tracking
     stockQuantity: v.number(), // Total stock in base/smallest unit
@@ -392,5 +433,167 @@ export default defineSchema({
     .index("by_brand", ["brandId"])
     .index("by_category", ["categoryId"])
     .index("by_base_unit", ["baseUnitId"]),
+
+  // Additional Charges table (simple - name only)
+  additionalCharges: defineTable({
+    organizationId: v.id("organizations"),
+    name: v.string(), // Charge name (e.g., "Delivery Fee", "Service Charge")
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.id("users"),
+    updatedBy: v.id("users"),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_name", ["organizationId", "name"]),
+
+  // Commission Agents table (name and mobile mandatory)
+  commissionAgents: defineTable({
+    organizationId: v.id("organizations"),
+    name: v.string(), // Agent name (mandatory)
+    mobile: v.string(), // Mobile number (mandatory)
+    email: v.optional(v.string()),
+    address: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.id("users"),
+    updatedBy: v.id("users"),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_mobile", ["organizationId", "mobile"]),
+
+  // Customers table (minimal mandatory fields - only name)
+  customers: defineTable({
+    organizationId: v.id("organizations"),
+    name: v.string(), // Customer name (mandatory)
+    type: v.optional(v.union(v.literal("business"), v.literal("individual"))),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    mobile: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("active"), v.literal("inactive"), v.literal("suspended"))),
+    billingAliases: v.optional(v.array(v.string())),
+    addresses: v.optional(
+      v.array(
+        v.object({
+          type: v.string(),
+          street: v.optional(v.string()),
+          city: v.optional(v.string()),
+          state: v.optional(v.string()),
+          zipCode: v.optional(v.string()),
+          country: v.optional(v.string()),
+          isDefault: v.optional(v.boolean()),
+        })
+      )
+    ),
+    metadata: v.optional(v.any()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.id("users"),
+    updatedBy: v.id("users"),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_name", ["organizationId", "name"])
+    .index("by_organization_email", ["organizationId", "email"])
+    .index("by_organization_phone", ["organizationId", "phone"]),
+
+  // Invoices table (for sales and purchases)
+  invoices: defineTable({
+    organizationId: v.id("organizations"),
+    invoiceNumber: v.string(),
+    type: v.union(v.literal("sale"), v.literal("purchase")),
+    
+    // Customer/Supplier references
+    customerId: v.optional(v.id("customers")),
+    supplierId: v.optional(v.string()), // Can be string for now if no supplier table
+    
+    // Billing information
+    billingName: v.optional(v.string()),
+    billingAddress: v.optional(v.any()),
+    
+    // Dates
+    invoiceDate: v.number(), // Timestamp
+    dueDate: v.optional(v.number()), // Timestamp
+    
+    // Financials (in cents)
+    subtotalCents: v.number(),
+    discountCents: v.number(),
+    discountType: v.union(v.literal("percentage"), v.literal("fixed")),
+    discountValue: v.number(),
+    additionalChargesCents: v.number(),
+    taxCents: v.number(),
+    totalCents: v.number(),
+    paidCents: v.number(),
+    dueCents: v.number(),
+    
+    // Status
+    status: v.union(
+      v.literal("draft"),
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("paid"),
+      v.literal("overdue"),
+      v.literal("cancelled")
+    ),
+    paymentStatus: v.union(
+      v.literal("pending"),
+      v.literal("partial"),
+      v.literal("paid"),
+      v.literal("overpaid")
+    ),
+    paymentMethod: v.optional(v.string()),
+    
+    // Line items (stored as array)
+    lineItems: v.array(
+      v.object({
+        productId: v.id("products"),
+        variationId: v.optional(v.string()),
+        unit: v.string(),
+        quantity: v.number(),
+        unitPriceCents: v.number(),
+        totalPriceCents: v.number(),
+        discountCents: v.number(),
+        costCents: v.number(),
+        profitCents: v.number(),
+        notes: v.optional(v.string()),
+      })
+    ),
+    
+    // Additional charges
+    additionalCharges: v.optional(
+      v.array(
+        v.object({
+          additionalChargeId: v.id("additionalCharges"),
+          lineItemIds: v.optional(v.array(v.string())),
+          amountCents: v.number(),
+        })
+      )
+    ),
+    
+    // Commission agent
+    commissionAgentId: v.optional(v.id("commissionAgents")),
+    
+    // Notes and terms
+    notes: v.optional(v.string()),
+    terms: v.optional(v.string()),
+    
+    // Locking
+    isLocked: v.boolean(),
+    lockedBy: v.optional(v.id("users")),
+    lockedAt: v.optional(v.number()),
+    
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.id("users"),
+    updatedBy: v.id("users"),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_type", ["organizationId", "type"])
+    .index("by_customer", ["customerId"])
+    .index("by_invoice_number", ["invoiceNumber"])
+    .index("by_status", ["status"])
+    .index("by_date", ["invoiceDate"]),
 });
 
