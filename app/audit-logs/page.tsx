@@ -29,7 +29,7 @@ export default function AuditLogsPage() {
       </div>
       
       {useAdvancedTable ? (
-        <AuditLogViewerAdvanced userId="current-user" />
+        <AuditLogViewerAdvanced />
       ) : (
         <AuditLogViewer />
       )}

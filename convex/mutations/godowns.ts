@@ -1,5 +1,6 @@
 import { mutation } from "../_generated/server";
 import { v } from "convex/values";
+import { logCreate, logUpdate, logDelete } from "../lib/auditLog";
 
 /**
  * Create a new godown
@@ -59,6 +60,29 @@ export const createGodown = mutation({
       updatedAt: Date.now(),
       createdBy: currentUser._id,
     });
+
+    // Create audit log
+    try {
+      await logCreate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "godown",
+        godownId,
+        {
+          name: args.name,
+          code: args.code,
+          location: args.location,
+          description: args.description,
+        },
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return godownId;
   },
@@ -120,6 +144,15 @@ export const updateGodown = mutation({
       }
     }
 
+    // Store old data for audit log
+    const oldData = {
+      name: godown.name,
+      code: godown.code,
+      location: godown.location,
+      description: godown.description,
+      isActive: godown.isActive,
+    };
+
     await ctx.db.patch(args.godownId, {
       name: args.name ?? godown.name,
       code: args.code ?? godown.code,
@@ -128,6 +161,33 @@ export const updateGodown = mutation({
       isActive: args.isActive ?? godown.isActive,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      const newData = {
+        name: args.name ?? godown.name,
+        code: args.code ?? godown.code,
+        location: args.location ?? godown.location,
+        description: args.description ?? godown.description,
+        isActive: args.isActive ?? godown.isActive,
+      };
+
+      await logUpdate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "godown",
+        args.godownId,
+        oldData,
+        newData,
+        {
+          excludeFields: ["updatedAt", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.godownId;
   },
@@ -170,11 +230,38 @@ export const deleteGodown = mutation({
       throw new Error("Godown not found");
     }
 
+    // Store godown data for audit log
+    const godownData = {
+      name: godown.name,
+      code: godown.code,
+      location: godown.location,
+      description: godown.description,
+      isActive: godown.isActive,
+    };
+
     // Soft delete
     await ctx.db.patch(args.godownId, {
       isActive: false,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      await logDelete(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "godown",
+        args.godownId,
+        godownData,
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.godownId;
   },

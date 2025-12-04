@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { User, Percent, DollarSign, Calculator, Plus } from 'lucide-react';
+import { User, Plus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,62 +10,20 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { CommissionAgent } from '@/types';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '@/lib/convex';
+import { useSession } from 'next-auth/react';
+import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
 interface CommissionAgentSelectorProps {
   selectedAgentId?: string;
   onAgentSelect: (agentId: string | undefined) => void;
-  totalProfitCents?: number; // For profit-based commission calculation
-  totalAmountCents?: number; // For account-based commission calculation
+  totalProfitCents?: number;
+  totalAmountCents?: number;
   allowCreate?: boolean;
   className?: string;
 }
-
-// Mock commission agents - will be replaced with store data
-const mockCommissionAgents: CommissionAgent[] = [
-  {
-    id: 'agent-1',
-    name: 'John Referral',
-    email: 'john@referral.com',
-    phone: '+1-555-0101',
-    commissionType: 'profit',
-    commissionValue: 10, // 10% of profit
-    isActive: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    createdBy: 'system',
-    updatedBy: 'system',
-    auditLogs: [],
-  },
-  {
-    id: 'agent-2',
-    name: 'Jane Partner',
-    email: 'jane@partner.com',
-    phone: '+1-555-0102',
-    commissionType: 'account',
-    commissionValue: 5, // 5% of total amount
-    isActive: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    createdBy: 'system',
-    updatedBy: 'system',
-    auditLogs: [],
-  },
-  {
-    id: 'agent-3',
-    name: 'Fixed Rate Agent',
-    email: 'fixed@agent.com',
-    commissionType: 'fixed',
-    commissionValue: 5000, // $50.00 fixed
-    isActive: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    createdBy: 'system',
-    updatedBy: 'system',
-    auditLogs: [],
-  },
-];
 
 export function CommissionAgentSelector({
   selectedAgentId,
@@ -75,43 +33,68 @@ export function CommissionAgentSelector({
   allowCreate = false,
   className,
 }: CommissionAgentSelectorProps) {
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+  const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [agents] = useState<CommissionAgent[]>(mockCommissionAgents);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentMobile, setNewAgentMobile] = useState('');
+  const [newAgentEmail, setNewAgentEmail] = useState('');
+  const [newAgentAddress, setNewAgentAddress] = useState('');
+  const [newAgentNotes, setNewAgentNotes] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
 
-  const selectedAgent = agents.find(a => a.id === selectedAgentId);
+  // Fetch commission agents from backend
+  const agents = useQuery(
+    api.queries.commissionAgents.getCommissionAgents,
+    userEmail ? { userEmail } : "skip"
+  );
 
-  const calculateCommission = (agent: CommissionAgent): number => {
-    if (!agent) return 0;
+  const createAgent = useMutation(api.mutations.commissionAgents.createCommissionAgent);
 
-    switch (agent.commissionType) {
-      case 'profit':
-        return Math.round((totalProfitCents * agent.commissionValue) / 100);
-      case 'account':
-        return Math.round((totalAmountCents * agent.commissionValue) / 100);
-      case 'fixed':
-        return agent.commissionValue;
-      default:
-        return 0;
+  const selectedAgent = agents?.find(a => a._id === selectedAgentId);
+
+  const handleCreateAgent = async () => {
+    if (!newAgentName.trim() || !newAgentMobile.trim()) {
+      toast({
+        title: "Error",
+        description: "Name and mobile are required",
+        variant: "destructive",
+      });
+      return;
     }
-  };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount / 100);
-  };
+    setIsCreating(true);
+    try {
+      await createAgent({
+        name: newAgentName.trim(),
+        mobile: newAgentMobile.trim(),
+        email: newAgentEmail.trim() || undefined,
+        address: newAgentAddress.trim() || undefined,
+        notes: newAgentNotes.trim() || undefined,
+        userEmail: userEmail || undefined,
+      });
 
-  const formatCommissionType = (type: string) => {
-    switch (type) {
-      case 'profit':
-        return 'Profit %';
-      case 'account':
-        return 'Account %';
-      case 'fixed':
-        return 'Fixed';
-      default:
-        return type;
+      toast({
+        title: "Success",
+        description: "Commission agent created successfully",
+      });
+
+      // Reset form
+      setNewAgentName('');
+      setNewAgentMobile('');
+      setNewAgentEmail('');
+      setNewAgentAddress('');
+      setNewAgentNotes('');
+      setIsCreateDialogOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create commission agent",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -131,46 +114,68 @@ export function CommissionAgentSelector({
               <DialogHeader>
                 <DialogTitle>Create Commission Agent</DialogTitle>
                 <DialogDescription>
-                  Add a new commission agent to the system.
+                  Add a new commission agent. Name and mobile are required.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label>Name *</Label>
-                  <Input placeholder="Agent name" />
+                  <Input
+                    placeholder="Agent name"
+                    value={newAgentName}
+                    onChange={(e) => setNewAgentName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Mobile *</Label>
+                  <Input
+                    type="tel"
+                    placeholder="Mobile number"
+                    value={newAgentMobile}
+                    onChange={(e) => setNewAgentMobile(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Email</Label>
-                  <Input type="email" placeholder="agent@example.com" />
+                  <Input
+                    type="email"
+                    placeholder="agent@example.com"
+                    value={newAgentEmail}
+                    onChange={(e) => setNewAgentEmail(e.target.value)}
+                  />
                 </div>
                 <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input type="tel" placeholder="+1-555-0100" />
+                  <Label>Address</Label>
+                  <Textarea
+                    placeholder="Agent address"
+                    value={newAgentAddress}
+                    onChange={(e) => setNewAgentAddress(e.target.value)}
+                    rows={2}
+                  />
                 </div>
                 <div className="space-y-2">
-                  <Label>Commission Type *</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="profit">Profit Percentage</SelectItem>
-                      <SelectItem value="account">Account Percentage</SelectItem>
-                      <SelectItem value="fixed">Fixed Amount</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Commission Value *</Label>
-                  <Input type="number" step="0.01" placeholder="0.00" />
+                  <Label>Notes</Label>
+                  <Textarea
+                    placeholder="Additional notes"
+                    value={newAgentNotes}
+                    onChange={(e) => setNewAgentNotes(e.target.value)}
+                    rows={2}
+                  />
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={() => setIsCreateDialogOpen(false)}>
-                  Create Agent
+                <Button onClick={handleCreateAgent} disabled={isCreating || !newAgentName.trim() || !newAgentMobile.trim()}>
+                  {isCreating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    "Create Agent"
+                  )}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -178,20 +183,25 @@ export function CommissionAgentSelector({
         )}
       </div>
 
-      <Select value={selectedAgentId || ''} onValueChange={(value) => onAgentSelect(value || undefined)}>
+      <Select
+        value={selectedAgentId || '__none__'}
+        onValueChange={(value) => onAgentSelect(value === '__none__' ? undefined : value)}
+      >
         <SelectTrigger>
           <SelectValue placeholder="Select commission agent (optional)" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">None</SelectItem>
-          {agents.filter(a => a.isActive).map((agent) => (
-            <SelectItem key={agent.id} value={agent.id}>
+          <SelectItem value="__none__">None</SelectItem>
+          {agents?.filter(a => a.isActive).map((agent) => (
+            <SelectItem key={agent._id} value={agent._id}>
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4" />
                 <span>{agent.name}</span>
-                <Badge variant="outline" className="text-xs">
-                  {formatCommissionType(agent.commissionType)}
-                </Badge>
+                {agent.mobile && (
+                  <Badge variant="outline" className="text-xs">
+                    {agent.mobile}
+                  </Badge>
+                )}
               </div>
             </SelectItem>
           ))}
@@ -206,46 +216,25 @@ export function CommissionAgentSelector({
                 <User className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium">{selectedAgent.name}</span>
               </div>
-              <Badge variant="outline">
-                {formatCommissionType(selectedAgent.commissionType)}
-              </Badge>
+              {selectedAgent.mobile && (
+                <Badge variant="outline" className="text-xs">
+                  {selectedAgent.mobile}
+                </Badge>
+              )}
             </div>
-            
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <span className="text-muted-foreground">Type:</span>{' '}
-                <span className="font-medium">
-                  {selectedAgent.commissionType === 'profit' && (
-                    <span className="flex items-center gap-1">
-                      <Percent className="h-3 w-3" />
-                      {selectedAgent.commissionValue}% of Profit
-                    </span>
-                  )}
-                  {selectedAgent.commissionType === 'account' && (
-                    <span className="flex items-center gap-1">
-                      <Calculator className="h-3 w-3" />
-                      {selectedAgent.commissionValue}% of Total
-                    </span>
-                  )}
-                  {selectedAgent.commissionType === 'fixed' && (
-                    <span className="flex items-center gap-1">
-                      <DollarSign className="h-3 w-3" />
-                      {formatCurrency(selectedAgent.commissionValue)}
-                    </span>
-                  )}
-                </span>
+            {selectedAgent.email && (
+              <div className="text-sm text-muted-foreground">
+                Email: {selectedAgent.email}
               </div>
-              <div className="text-right">
-                <span className="text-muted-foreground">Commission:</span>{' '}
-                <span className="font-semibold text-primary">
-                  {formatCurrency(calculateCommission(selectedAgent))}
-                </span>
+            )}
+            {selectedAgent.address && (
+              <div className="text-sm text-muted-foreground">
+                Address: {selectedAgent.address}
               </div>
-            </div>
+            )}
           </div>
         </Card>
       )}
     </div>
   );
 }
-

@@ -1,5 +1,6 @@
 import { mutation } from "../_generated/server";
 import { v } from "convex/values";
+import { logCreate, logUpdate, logDelete } from "../lib/auditLog";
 
 /**
  * Create a new category
@@ -59,6 +60,29 @@ export const createCategory = mutation({
       updatedAt: Date.now(),
       createdBy: currentUser._id,
     });
+
+    // Create audit log
+    try {
+      await logCreate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "category",
+        categoryId,
+        {
+          name: args.name,
+          code: args.code,
+          description: args.description,
+          parentId: args.parentId,
+        },
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return categoryId;
   },
@@ -120,6 +144,15 @@ export const updateCategory = mutation({
       }
     }
 
+    // Store old data for audit log
+    const oldData = {
+      name: category.name,
+      code: category.code,
+      description: category.description,
+      parentId: category.parentId,
+      isActive: category.isActive,
+    };
+
     await ctx.db.patch(args.categoryId, {
       name: args.name ?? category.name,
       code: args.code ?? category.code,
@@ -128,6 +161,33 @@ export const updateCategory = mutation({
       isActive: args.isActive ?? category.isActive,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      const newData = {
+        name: args.name ?? category.name,
+        code: args.code ?? category.code,
+        description: args.description ?? category.description,
+        parentId: args.parentId ?? category.parentId,
+        isActive: args.isActive ?? category.isActive,
+      };
+
+      await logUpdate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "category",
+        args.categoryId,
+        oldData,
+        newData,
+        {
+          excludeFields: ["updatedAt", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.categoryId;
   },
@@ -170,11 +230,38 @@ export const deleteCategory = mutation({
       throw new Error("Category not found");
     }
 
+    // Store category data for audit log
+    const categoryData = {
+      name: category.name,
+      code: category.code,
+      description: category.description,
+      parentId: category.parentId,
+      isActive: category.isActive,
+    };
+
     // Soft delete
     await ctx.db.patch(args.categoryId, {
       isActive: false,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      await logDelete(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "category",
+        args.categoryId,
+        categoryData,
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.categoryId;
   },

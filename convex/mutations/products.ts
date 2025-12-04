@@ -1,5 +1,6 @@
 import { mutation } from "../_generated/server";
 import { v } from "convex/values";
+import { logCreate, logUpdate, logDelete } from "../lib/auditLog";
 
 /**
  * Create a new product
@@ -15,6 +16,7 @@ export const createProduct = mutation({
     baseUnitId: v.id("units"),
     salePrice: v.number(), // Base unit sale price in cents
     purchasePrice: v.number(), // Base unit purchase price in cents
+    fakePrice: v.optional(v.boolean()), // Fake price flag
     stockQuantity: v.number(), // Stock in base unit
     minStockLevel: v.number(),
     maxStockLevel: v.optional(v.number()),
@@ -99,6 +101,7 @@ export const createProduct = mutation({
       baseUnitId: args.baseUnitId,
       salePrice: args.salePrice,
       purchasePrice: args.purchasePrice,
+      fakePrice: args.fakePrice ?? false,
       stockQuantity: args.stockQuantity,
       stockValue: stockValue,
       minStockLevel: args.minStockLevel,
@@ -114,6 +117,42 @@ export const createProduct = mutation({
       updatedAt: Date.now(),
       createdBy: currentUser._id,
     });
+
+    // Create audit log
+    try {
+      await logCreate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "product",
+        String(productId), // Ensure productId is a string
+        {
+          name: args.name,
+          sku: args.sku,
+          description: args.description,
+          barcode: args.barcode,
+          brandId: args.brandId,
+          categoryId: args.categoryId,
+          baseUnitId: args.baseUnitId,
+          salePrice: args.salePrice,
+          purchasePrice: args.purchasePrice,
+          stockQuantity: args.stockQuantity,
+          minStockLevel: args.minStockLevel,
+          maxStockLevel: args.maxStockLevel ?? 10000,
+        },
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      // Log error but don't fail the mutation
+      console.error("Failed to create audit log for product creation:", error);
+      // Re-throw in development to see the actual error
+      if (process.env.NODE_ENV === "development") {
+        throw error;
+      }
+    }
 
     return productId;
   },
@@ -132,6 +171,7 @@ export const updateProduct = mutation({
     categoryId: v.optional(v.id("categories")),
     salePrice: v.optional(v.number()),
     purchasePrice: v.optional(v.number()),
+    fakePrice: v.optional(v.boolean()),
     stockQuantity: v.optional(v.number()),
     minStockLevel: v.optional(v.number()),
     maxStockLevel: v.optional(v.number()),
@@ -157,13 +197,14 @@ export const updateProduct = mutation({
       v.array(
         v.object({
           name: v.string(),
-          sku: v.string(),
+          sku: v.optional(v.string()),
           color: v.string(),
           barcode: v.optional(v.string()),
           isActive: v.boolean(),
         })
       )
     ),
+    metadata: v.optional(v.any()),
     userEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -200,6 +241,27 @@ export const updateProduct = mutation({
     const newPurchasePrice = args.purchasePrice ?? product.purchasePrice;
     const stockValue = newStockQuantity * newPurchasePrice;
 
+    // Store old data for audit log
+    const oldData = {
+      name: product.name,
+      description: product.description,
+      barcode: product.barcode,
+      brandId: product.brandId,
+      categoryId: product.categoryId,
+      salePrice: product.salePrice,
+      purchasePrice: product.purchasePrice,
+      fakePrice: product.fakePrice,
+      stockQuantity: product.stockQuantity,
+      stockValue: product.stockValue,
+      minStockLevel: product.minStockLevel,
+      maxStockLevel: product.maxStockLevel,
+      unitPricing: product.unitPricing,
+      unitConversionIds: product.unitConversionIds,
+      godownStocks: product.godownStocks,
+      variations: product.variations,
+      metadata: product.metadata,
+    };
+
     await ctx.db.patch(args.productId, {
       name: args.name ?? product.name,
       description: args.description ?? product.description,
@@ -208,6 +270,7 @@ export const updateProduct = mutation({
       categoryId: args.categoryId ?? product.categoryId,
       salePrice: args.salePrice ?? product.salePrice,
       purchasePrice: args.purchasePrice ?? product.purchasePrice,
+      fakePrice: args.fakePrice ?? product.fakePrice ?? false,
       stockQuantity: args.stockQuantity ?? product.stockQuantity,
       stockValue: stockValue,
       minStockLevel: args.minStockLevel ?? product.minStockLevel,
@@ -216,8 +279,56 @@ export const updateProduct = mutation({
       unitConversionIds: args.unitConversionIds ?? product.unitConversionIds,
       godownStocks: args.godownStocks ?? product.godownStocks,
       variations: args.variations ?? product.variations,
+      metadata: args.metadata ?? product.metadata,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      const newData = {
+        name: args.name ?? product.name,
+        description: args.description ?? product.description,
+        barcode: args.barcode ?? product.barcode,
+        brandId: args.brandId ?? product.brandId,
+        categoryId: args.categoryId ?? product.categoryId,
+        salePrice: args.salePrice ?? product.salePrice,
+        purchasePrice: args.purchasePrice ?? product.purchasePrice,
+        fakePrice: args.fakePrice ?? product.fakePrice ?? false,
+        stockQuantity: args.stockQuantity ?? product.stockQuantity,
+        stockValue: stockValue,
+        minStockLevel: args.minStockLevel ?? product.minStockLevel,
+        maxStockLevel: args.maxStockLevel ?? product.maxStockLevel,
+        unitPricing: args.unitPricing ?? product.unitPricing,
+        unitConversionIds: args.unitConversionIds ?? product.unitConversionIds,
+        godownStocks: args.godownStocks ?? product.godownStocks,
+        variations: args.variations ?? product.variations,
+        metadata: args.metadata ?? product.metadata,
+      };
+
+      await logUpdate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "product",
+        String(args.productId), // Ensure productId is a string
+        oldData,
+        newData,
+        {
+          excludeFields: ["updatedAt", "_id", "_creationTime"],
+        }
+      );
+    } catch (error: any) {
+      // Log error but don't fail the mutation
+      // Skip if it's just "No changes detected" - that's expected
+      if (error?.message !== "No changes detected") {
+        console.error("Failed to create audit log for product update:", error);
+        // Re-throw in development to see the actual error
+        if (process.env.NODE_ENV === "development") {
+          throw error;
+        }
+      }
+    }
 
     return args.productId;
   },
@@ -260,11 +371,48 @@ export const deleteProduct = mutation({
       throw new Error("Product not found");
     }
 
+    // Store product data for audit log before deletion
+    const productData = {
+      name: product.name,
+      sku: product.sku,
+      description: product.description,
+      barcode: product.barcode,
+      brandId: product.brandId,
+      categoryId: product.categoryId,
+      salePrice: product.salePrice,
+      purchasePrice: product.purchasePrice,
+      stockQuantity: product.stockQuantity,
+      isActive: product.isActive,
+    };
+
     // Soft delete
     await ctx.db.patch(args.productId, {
       isActive: false,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      await logDelete(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "product",
+        String(args.productId), // Ensure productId is a string
+        productData,
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      // Log error but don't fail the mutation
+      console.error("Failed to create audit log for product deletion:", error);
+      // Re-throw in development to see the actual error
+      if (process.env.NODE_ENV === "development") {
+        throw error;
+      }
+    }
 
     return args.productId;
   },

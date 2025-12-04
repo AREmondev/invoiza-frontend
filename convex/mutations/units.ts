@@ -1,5 +1,6 @@
 import { mutation } from "../_generated/server";
 import { v } from "convex/values";
+import { logCreate, logUpdate, logDelete } from "../lib/auditLog";
 
 /**
  * Create a new unit
@@ -59,6 +60,29 @@ export const createUnit = mutation({
       updatedAt: Date.now(),
       createdBy: currentUser._id,
     });
+
+    // Create audit log
+    try {
+      await logCreate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "unit",
+        unitId,
+        {
+          name: args.name,
+          abbreviation: args.abbreviation,
+          description: args.description,
+          isBaseUnit: args.isBaseUnit ?? false,
+        },
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return unitId;
   },
@@ -120,6 +144,15 @@ export const updateUnit = mutation({
       }
     }
 
+    // Store old data for audit log
+    const oldData = {
+      name: unit.name,
+      abbreviation: unit.abbreviation,
+      description: unit.description,
+      isBaseUnit: unit.isBaseUnit,
+      isActive: unit.isActive,
+    };
+
     await ctx.db.patch(args.unitId, {
       name: args.name ?? unit.name,
       abbreviation: args.abbreviation ?? unit.abbreviation,
@@ -128,6 +161,33 @@ export const updateUnit = mutation({
       isActive: args.isActive ?? unit.isActive,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      const newData = {
+        name: args.name ?? unit.name,
+        abbreviation: args.abbreviation ?? unit.abbreviation,
+        description: args.description ?? unit.description,
+        isBaseUnit: args.isBaseUnit ?? unit.isBaseUnit,
+        isActive: args.isActive ?? unit.isActive,
+      };
+
+      await logUpdate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "unit",
+        args.unitId,
+        oldData,
+        newData,
+        {
+          excludeFields: ["updatedAt", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.unitId;
   },
@@ -170,11 +230,38 @@ export const deleteUnit = mutation({
       throw new Error("Unit not found");
     }
 
+    // Store unit data for audit log
+    const unitData = {
+      name: unit.name,
+      abbreviation: unit.abbreviation,
+      description: unit.description,
+      isBaseUnit: unit.isBaseUnit,
+      isActive: unit.isActive,
+    };
+
     // Soft delete
     await ctx.db.patch(args.unitId, {
       isActive: false,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      await logDelete(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "unit",
+        args.unitId,
+        unitData,
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.unitId;
   },

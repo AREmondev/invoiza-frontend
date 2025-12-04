@@ -1,5 +1,6 @@
 import { mutation } from "../_generated/server";
 import { v } from "convex/values";
+import { logCreate, logUpdate, logDelete } from "../lib/auditLog";
 
 /**
  * Create a new brand
@@ -59,6 +60,29 @@ export const createBrand = mutation({
       updatedAt: Date.now(),
       createdBy: currentUser._id,
     });
+
+    // Create audit log
+    try {
+      await logCreate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "brand",
+        brandId,
+        {
+          name: args.name,
+          code: args.code,
+          description: args.description,
+          manufacturer: args.manufacturer,
+        },
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return brandId;
   },
@@ -120,6 +144,15 @@ export const updateBrand = mutation({
       }
     }
 
+    // Store old data for audit log
+    const oldData = {
+      name: brand.name,
+      code: brand.code,
+      description: brand.description,
+      manufacturer: brand.manufacturer,
+      isActive: brand.isActive,
+    };
+
     await ctx.db.patch(args.brandId, {
       name: args.name ?? brand.name,
       code: args.code ?? brand.code,
@@ -128,6 +161,33 @@ export const updateBrand = mutation({
       isActive: args.isActive ?? brand.isActive,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      const newData = {
+        name: args.name ?? brand.name,
+        code: args.code ?? brand.code,
+        description: args.description ?? brand.description,
+        manufacturer: args.manufacturer ?? brand.manufacturer,
+        isActive: args.isActive ?? brand.isActive,
+      };
+
+      await logUpdate(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "brand",
+        args.brandId,
+        oldData,
+        newData,
+        {
+          excludeFields: ["updatedAt", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.brandId;
   },
@@ -170,11 +230,38 @@ export const deleteBrand = mutation({
       throw new Error("Brand not found");
     }
 
+    // Store brand data for audit log
+    const brandData = {
+      name: brand.name,
+      code: brand.code,
+      description: brand.description,
+      manufacturer: brand.manufacturer,
+      isActive: brand.isActive,
+    };
+
     // Soft delete
     await ctx.db.patch(args.brandId, {
       isActive: false,
       updatedAt: Date.now(),
     });
+
+    // Create audit log
+    try {
+      await logDelete(
+        ctx.db,
+        currentUser.organizationId,
+        currentUser._id,
+        currentUser.name,
+        "brand",
+        args.brandId,
+        brandData,
+        {
+          excludeFields: ["createdAt", "updatedAt", "createdBy", "organizationId", "_id", "_creationTime"],
+        }
+      );
+    } catch (error) {
+      console.error("Failed to create audit log:", error);
+    }
 
     return args.brandId;
   },

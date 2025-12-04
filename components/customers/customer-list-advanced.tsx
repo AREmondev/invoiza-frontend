@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from 'react';
+import { useQuery, useMutation } from 'convex/react';
+import { useSession } from 'next-auth/react';
 import { AdvancedDataTable, AdvancedColumnDef, ColumnFilterConfig } from '@/components/ui/advanced-data-table';
 import { Button } from '@/components/ui/button';
 import { Plus, Pencil, Trash, Eye, Mail, Phone } from 'lucide-react';
@@ -8,145 +10,8 @@ import { AddCustomerDialog } from './add-customer-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Customer } from '@/types';
 import { format } from 'date-fns';
-
-// Mock data - in real app this would come from your store
-const mockCustomers: Customer[] = [
-  {
-    id: '1',
-    name: 'Acme Corporation',
-    type: 'business',
-    email: 'contact@acme.com',
-    phone: '+1 (555) 123-4567',
-    status: 'active',
-    billingAliases: ['Acme Corp', 'ACME Inc'],
-    addresses: [
-      {
-        id: 'addr1',
-        type: 'billing',
-        street: '123 Business St',
-        city: 'New York',
-        state: 'NY',
-        zipCode: '10001',
-        country: 'USA',
-        isDefault: true
-      }
-    ],
-    metadata: {
-      creditLimit: 50000,
-      paymentTerms: 'Net 30',
-      preferredContactMethod: 'email',
-      registrationDate: '2023-01-15'
-    }
-  },
-  {
-    id: '2',
-    name: 'John Smith',
-    type: 'individual',
-    email: 'john.smith@email.com',
-    phone: '+1 (555) 234-5678',
-    status: 'active',
-    billingAliases: ['J. Smith'],
-    addresses: [
-      {
-        id: 'addr2',
-        type: 'billing',
-        street: '456 Residential Ave',
-        city: 'Los Angeles',
-        state: 'CA',
-        zipCode: '90001',
-        country: 'USA',
-        isDefault: true
-      }
-    ],
-    metadata: {
-      creditLimit: 5000,
-      paymentTerms: 'Net 15',
-      preferredContactMethod: 'phone',
-      registrationDate: '2023-02-20'
-    }
-  },
-  {
-    id: '3',
-    name: 'Tech Solutions Inc',
-    type: 'business',
-    email: 'info@techsolutions.com',
-    phone: '+1 (555) 345-6789',
-    status: 'inactive',
-    billingAliases: ['TechSol', 'TSI'],
-    addresses: [
-      {
-        id: 'addr3',
-        type: 'billing',
-        street: '789 Tech Park',
-        city: 'San Francisco',
-        state: 'CA',
-        zipCode: '94105',
-        country: 'USA',
-        isDefault: true
-      }
-    ],
-    metadata: {
-      creditLimit: 25000,
-      paymentTerms: 'Net 45',
-      preferredContactMethod: 'email',
-      registrationDate: '2022-11-10'
-    }
-  },
-  {
-    id: '4',
-    name: 'Sarah Johnson',
-    type: 'individual',
-    email: 'sarah.j@email.com',
-    phone: '+1 (555) 456-7890',
-    status: 'active',
-    billingAliases: ['S. Johnson'],
-    addresses: [
-      {
-        id: 'addr4',
-        type: 'billing',
-        street: '321 Home St',
-        city: 'Chicago',
-        state: 'IL',
-        zipCode: '60601',
-        country: 'USA',
-        isDefault: true
-      }
-    ],
-    metadata: {
-      creditLimit: 7500,
-      paymentTerms: 'Net 30',
-      preferredContactMethod: 'email',
-      registrationDate: '2023-03-05'
-    }
-  },
-  {
-    id: '5',
-    name: 'Global Enterprises Ltd',
-    type: 'business',
-    email: 'orders@globalenterprises.com',
-    phone: '+1 (555) 567-8901',
-    status: 'active',
-    billingAliases: ['Global Ent', 'GEL'],
-    addresses: [
-      {
-        id: 'addr5',
-        type: 'billing',
-        street: '555 Corporate Blvd',
-        city: 'Miami',
-        state: 'FL',
-        zipCode: '33101',
-        country: 'USA',
-        isDefault: true
-      }
-    ],
-    metadata: {
-      creditLimit: 100000,
-      paymentTerms: 'Net 60',
-      preferredContactMethod: 'phone',
-      registrationDate: '2022-08-15'
-    }
-  }
-];
+import { api } from '@/lib/convex';
+import { useToast } from '@/hooks/use-toast';
 
 interface CustomerListWithAdvancedTableProps {
   userId: string;
@@ -155,6 +20,28 @@ interface CustomerListWithAdvancedTableProps {
 export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvancedTableProps) {
   const [open, setOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+  const { toast } = useToast();
+
+  // Load customers from Convex
+  const customers = useQuery(
+    api.queries.customers.getCustomers,
+    userEmail ? { userEmail } : "skip"
+  ) || [];
+
+  // Convert Convex customers to Customer type
+  const convertedCustomers: Customer[] = customers.map((c: any) => ({
+    id: c._id,
+    name: c.name,
+    type: c.type || 'individual',
+    email: c.email,
+    phone: c.phone || c.mobile,
+    status: c.status || 'active',
+    billingAliases: c.billingAliases || [],
+    addresses: c.addresses || [],
+    metadata: c.metadata || {},
+  }));
 
   const handleViewCustomer = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -476,7 +363,7 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
         <div className="flex items-center gap-4">
           <h2 className="text-lg font-semibold">Customer Directory</h2>
           <Badge variant="secondary" className="text-sm">
-            {mockCustomers.length} customers
+            {convertedCustomers.length} customers
           </Badge>
         </div>
         <Button onClick={() => setOpen(true)}>
@@ -487,7 +374,7 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
 
       <AdvancedDataTable
         columns={columns}
-        data={mockCustomers}
+        data={convertedCustomers}
         tableId="customers"
         userId={userId}
         searchable={true}
@@ -583,7 +470,17 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
         </div>
       )}
 
-      <AddCustomerDialog open={open} onOpenChange={setOpen} />
+      <AddCustomerDialog 
+        open={open} 
+        onOpenChange={setOpen}
+        onCustomerAdded={() => {
+          // Customer list will automatically refresh via useQuery
+          toast({
+            title: "Success",
+            description: "Customer added successfully.",
+          });
+        }}
+      />
     </div>
   );
 }

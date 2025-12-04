@@ -212,7 +212,7 @@ export function BillingAliasSelector({
           )}
         </div>
         
-        <Select value={selectedAliasId || ''} onValueChange={onAliasSelect}>
+        <Select value={selectedAliasId || '__none__'} onValueChange={(value) => onAliasSelect(value === '__none__' ? undefined : value)}>
           <SelectTrigger>
             <SelectValue placeholder="Select billing name">
               {selectedAlias ? (
@@ -232,7 +232,7 @@ export function BillingAliasSelector({
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">
+            <SelectItem value="__none__">
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4" />
                 <span>Use customer name ({customer?.name})</span>

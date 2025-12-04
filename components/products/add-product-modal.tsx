@@ -28,8 +28,9 @@ import { CalendarIcon, Plus, Trash2, Package, Ruler, Link2 } from "lucide-react"
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Badge } from "@/components/ui/badge";
 import { ProductUnit, ProductVariation } from "@/types";
-import { GodownSelector } from "@/components/shared/GodownSelector";
+// import { GodownSelector } from "@/components/shared/GodownSelector";
 import { useToast } from "@/hooks/use-toast";
 
 interface UnitPricingForm {
@@ -48,24 +49,36 @@ interface ColorVariationForm {
   color: string; // Color hex code
 }
 
-export function AddProductModal() {
+interface AddProductModalProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function AddProductModal({ open: externalOpen, onOpenChange: externalOnOpenChange }: AddProductModalProps = {}) {
   const { data: session } = useSession();
   const userEmail = session?.user?.email;
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCreatingConversion, setIsCreatingConversionState] = useState(false);
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const setOpen = externalOnOpenChange || setInternalOpen;
   const [expiryDate, setExpiryDate] = useState<Date>();
   const [selectedBrandId, setSelectedBrandId] = useState<string>("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
   const [selectedBaseUnitId, setSelectedBaseUnitId] = useState<string>("");
   const [unitPricings, setUnitPricings] = useState<UnitPricingForm[]>([]);
   const [colorVariations, setColorVariations] = useState<ColorVariationForm[]>([]);
-  const [selectedGodownIds, setSelectedGodownIds] = useState<string[]>([]);
+  // const [selectedGodownIds, setSelectedGodownIds] = useState<string[]>([]);
   const [baseSalePrice, setBaseSalePrice] = useState<number>(0);
   const [basePurchasePrice, setBasePurchasePrice] = useState<number>(0);
   const [baseStockQuantity, setBaseStockQuantity] = useState<number>(0);
   const [minStockLevel, setMinStockLevel] = useState<number>(0);
-  const [isCreatingConversion, setIsCreatingConversion] = useState<boolean>(false);
+  const [fakePrice, setFakePrice] = useState<boolean>(false);
+  const [showPreview, setShowPreview] = useState<boolean>(false);
   const isUpdatingRef = useRef(false);
+  const [productName, setProductName] = useState<string>("");
+  const [productSku, setProductSku] = useState<string>("");
   
   // Fetch data from backend
   const brands = useQuery(
@@ -186,30 +199,53 @@ export function AddProductModal() {
     ));
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handlePreview = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
+    setShowPreview(true);
+  };
+
+  const handleSubmit = async (e?: React.FormEvent<HTMLFormElement>) => {
+    if (e) e.preventDefault();
     
-    const productName = formData.get('name') as string;
-    if (!productName || productName.trim() === '') {
-      toast({
-        title: "Error",
-        description: "Item Name is required",
-        variant: "destructive",
-      });
-      return;
-    }
+    if (isSubmitting) return; // Prevent double submission
     
-    if (!selectedBaseUnitId) {
-      toast({
-        title: "Error",
-        description: "Please select a base unit",
-        variant: "destructive",
-      });
-      return;
-    }
+    setIsSubmitting(true);
     
     try {
+      const form = document.querySelector('form') as HTMLFormElement;
+      const formData = new FormData(form || e?.currentTarget);
+      
+      // Get product name from state or form
+      const nameValue = productName || (formData.get('name') as string) || '';
+      if (!nameValue || nameValue.trim() === '') {
+        toast({
+          title: "Error",
+          description: "Item Name is required",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+    
+    // Get or generate SKU
+    let productSkuValue = productSku || (formData.get('sku') as string) || '';
+    if (!productSkuValue || productSkuValue.trim() === '') {
+      // Auto-generate SKU: first 3 letters of name + random 6 digits
+      const namePrefix = nameValue.trim().substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'PRD';
+      const randomNum = Math.floor(100000 + Math.random() * 900000);
+      productSkuValue = `${namePrefix}${randomNum}`;
+    }
+    
+      if (!selectedBaseUnitId) {
+        toast({
+          title: "Error",
+          description: "Please select a base unit",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+      
       // Create new conversions if needed and get conversion IDs
       const conversionIds: string[] = [];
       
@@ -221,6 +257,7 @@ export function AddProductModal() {
           } else if (pricing.conversionFactor) {
             // Create new conversion
             try {
+              setIsCreatingConversionState(true);
               const newConversionId = await createUnitConversion({
                 baseUnitId: selectedBaseUnitId as any,
                 secondaryUnitId: pricing.secondaryUnitId as any,
@@ -231,7 +268,14 @@ export function AddProductModal() {
               conversionIds.push(newConversionId as any);
             } catch (error: any) {
               console.error("Error creating conversion:", error);
+              toast({
+                title: "Warning",
+                description: "Failed to create unit conversion, continuing without it",
+                variant: "destructive",
+              });
               // Continue even if conversion creation fails
+            } finally {
+              setIsCreatingConversionState(false);
             }
           }
         }
@@ -271,22 +315,23 @@ export function AddProductModal() {
       // Build color variations - schema uses attributes, but mutation expects direct color field
       // Check both formats to match backend
       const variations = colorVariations
-        .filter(v => v.name && v.sku) // Only include complete variations
+        .filter(v => v.name) // Only include variations with name (SKU is optional)
         .map(variation => ({
           name: variation.name,
-          sku: variation.sku,
+          sku: variation.sku || undefined, // Make SKU optional
           color: variation.color, // Direct color field for mutation
           barcode: undefined as string | undefined,
           isActive: true,
         }));
       
       // Build godown stocks
-      const godownStocks = selectedGodownIds.length > 0
-        ? selectedGodownIds.map(godownId => ({
-            godownId: godownId as any,
-            quantity: baseStockQuantity / selectedGodownIds.length, // Distribute evenly
-          }))
-        : undefined;
+      // const godownStocks = selectedGodownIds.length > 0
+      //   ? selectedGodownIds.map(godownId => ({
+      //       godownId: godownId as any,
+      //       quantity: baseStockQuantity / selectedGodownIds.length, // Distribute evenly
+      //     }))
+      //   : undefined;
+      const godownStocks = undefined;
       
       const productSku = (formData.get('sku') as string)?.trim();
       if (!productSku) {
@@ -298,30 +343,63 @@ export function AddProductModal() {
         return;
       }
       
-      await createProductMutation({
-        name: productName.trim(),
-        sku: productSku,
-        description: (formData.get('description') as string) || undefined,
-        barcode: (formData.get('barcode') as string) || undefined,
-        brandId: selectedBrandId ? (selectedBrandId as any) : undefined,
-        categoryId: selectedCategoryId ? (selectedCategoryId as any) : undefined,
-        baseUnitId: selectedBaseUnitId as any,
-        salePrice: Math.round(baseSalePrice * 100), // Convert to cents
-        purchasePrice: Math.round(basePurchasePrice * 100),
-        stockQuantity: baseStockQuantity,
-        minStockLevel: minStockLevel,
-        maxStockLevel: 10000,
-        unitPricing: unitPricing.length > 0 ? unitPricing : undefined,
-        unitConversionIds: conversionIds.length > 0 ? (conversionIds as any[]) : undefined,
-        godownStocks: godownStocks,
-        variations: variations.length > 0 ? variations : undefined,
-        images: [],
-        metadata: expiryDate ? { expiryDate: expiryDate.toISOString() } : undefined,
-        userEmail: userEmail || undefined,
-      });
+      try {
+        await createProductMutation({
+          name: nameValue.trim(),
+          sku: productSkuValue.trim(),
+          description: (formData.get('description') as string) || undefined,
+          barcode: (formData.get('barcode') as string) || undefined,
+          brandId: selectedBrandId ? (selectedBrandId as any) : undefined,
+          categoryId: selectedCategoryId ? (selectedCategoryId as any) : undefined,
+          baseUnitId: selectedBaseUnitId as any,
+          salePrice: Math.round(baseSalePrice * 100), // Convert to cents
+          purchasePrice: Math.round(basePurchasePrice * 100),
+          stockQuantity: baseStockQuantity,
+          minStockLevel: minStockLevel,
+          maxStockLevel: 10000,
+          unitPricing: unitPricing.length > 0 ? unitPricing : undefined,
+          unitConversionIds: conversionIds.length > 0 ? (conversionIds as any[]) : undefined,
+          // godownStocks: godownStocks,
+          variations: variations.length > 0 ? variations : undefined,
+          images: [],
+          metadata: expiryDate ? { expiryDate: expiryDate.toISOString() } : undefined,
+          fakePrice: fakePrice,
+          userEmail: userEmail || undefined,
+        });
+      } catch (error: any) {
+        // If error is about fakePrice not being in validator, try without it
+        if (error.message?.includes('fakePrice') || error.message?.includes('extra field')) {
+          console.warn('fakePrice not recognized by Convex, retrying without it. Please restart Convex dev server.');
+          await createProductMutation({
+            name: productName.trim(),
+            sku: productSku,
+            description: (formData.get('description') as string) || undefined,
+            barcode: (formData.get('barcode') as string) || undefined,
+            brandId: selectedBrandId ? (selectedBrandId as any) : undefined,
+            categoryId: selectedCategoryId ? (selectedCategoryId as any) : undefined,
+            baseUnitId: selectedBaseUnitId as any,
+            salePrice: Math.round(baseSalePrice * 100),
+            purchasePrice: Math.round(basePurchasePrice * 100),
+            stockQuantity: baseStockQuantity,
+            minStockLevel: minStockLevel,
+            maxStockLevel: 10000,
+            unitPricing: unitPricing.length > 0 ? unitPricing : undefined,
+            unitConversionIds: conversionIds.length > 0 ? (conversionIds as any[]) : undefined,
+            // godownStocks: godownStocks,
+            variations: variations.length > 0 ? variations : undefined,
+            images: [],
+            metadata: expiryDate ? { expiryDate: expiryDate.toISOString() } : undefined,
+            userEmail: userEmail || undefined,
+          });
+        } else {
+          throw error;
+        }
+      }
       
       setOpen(false);
       // Reset form
+      setProductName("");
+      setProductSku("");
       setSelectedBrandId("");
       setSelectedCategoryId("");
       setSelectedBaseUnitId(baseUnit?._id || "");
@@ -332,7 +410,10 @@ export function AddProductModal() {
       setBaseSalePrice(0);
       setBasePurchasePrice(0);
       setMinStockLevel(0);
-      setSelectedGodownIds([]);
+      setFakePrice(false);
+      setShowPreview(false);
+      // setSelectedGodownIds([]);
+      
       toast({
         title: "Success",
         description: "Product created successfully",
@@ -344,20 +425,58 @@ export function AddProductModal() {
         description: error.message || 'Failed to create product',
         variant: "destructive",
       });
+    } finally {
+      setIsSubmitting(false);
+      setIsCreatingConversionState(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>Add Product</Button>
-      </DialogTrigger>
+      {externalOpen === undefined && (
+        <DialogTrigger asChild>
+          <Button>Add Product</Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Add New Product</DialogTitle>
           </DialogHeader>
           
+          {showPreview && (
+            <div className="mt-4 p-4 border rounded-lg bg-gray-50 max-h-96 overflow-y-auto">
+              <h3 className="font-semibold mb-3">Product Preview</h3>
+              <div className="space-y-2 text-sm">
+                <div><strong>Name:</strong> {productName || (document.querySelector('#name') as HTMLInputElement)?.value || 'N/A'}</div>
+                <div><strong>SKU:</strong> {productSku || (document.querySelector('#sku') as HTMLInputElement)?.value || 'N/A'}</div>
+                <div><strong>Brand:</strong> {brands?.find((b: any) => b._id === selectedBrandId)?.name || 'N/A'}</div>
+                <div><strong>Category:</strong> {categories?.find((c: any) => c._id === selectedCategoryId)?.name || 'N/A'}</div>
+                <div><strong>Base Unit:</strong> {baseUnit?.name || 'N/A'}</div>
+                <div><strong>Sale Price:</strong> ${baseSalePrice.toFixed(2)}</div>
+                <div><strong>Purchase Price:</strong> ${basePurchasePrice.toFixed(2)}</div>
+                <div><strong>Stock Quantity:</strong> {baseStockQuantity}</div>
+                <div><strong>Min Stock Level:</strong> {minStockLevel}</div>
+                <div><strong>Fake Price:</strong> {fakePrice ? 'Yes' : 'No'}</div>
+                {expiryDate && <div><strong>Expiry Date:</strong> {format(expiryDate, "PPP")}</div>}
+                {colorVariations.length > 0 && (
+                  <div>
+                    <strong>Variations:</strong> {colorVariations.length} color(s)
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 flex gap-2">
+                <Button type="button" onClick={() => setShowPreview(false)} variant="outline">
+                  Edit
+                </Button>
+                <Button type="button" onClick={handleSubmit}>
+                  Confirm & Save
+                </Button>
+              </div>
+            </div>
+          )}
+          
+          {!showPreview && (
           <Tabs defaultValue="basic" className="mt-4">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="basic">Basic Info</TabsTrigger>
@@ -368,11 +487,23 @@ export function AddProductModal() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Item Name *</Label>
-                  <Input id="name" name="name" required />
+                  <Input 
+                    id="name" 
+                    name="name" 
+                    value={productName}
+                    onChange={(e) => setProductName(e.target.value)}
+                    required 
+                  />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="sku">SKU *</Label>
-                  <Input id="sku" name="sku" required />
+                  <Label htmlFor="sku">SKU</Label>
+                  <Input 
+                    id="sku" 
+                    name="sku" 
+                    value={productSku}
+                    onChange={(e) => setProductSku(e.target.value)}
+                    placeholder="Auto-generated if empty"
+                  />
                 </div>
               </div>
               
@@ -411,14 +542,15 @@ export function AddProductModal() {
                 </div>
               </div>
               
-              <div className="space-y-2">
+              {/* Godown selector commented out temporarily */}
+              {/* <div className="space-y-2">
                 <GodownSelector
                   selectedGodownIds={selectedGodownIds}
                   onGodownsChange={setSelectedGodownIds}
                   allowMultiple={true}
                   allowCreate={true}
                 />
-              </div>
+              </div> */}
               
               <div className="space-y-2">
                 <Label>Expiry Date</Label>
@@ -445,6 +577,17 @@ export function AddProductModal() {
                     />
                   </PopoverContent>
                 </Popover>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="fakePrice"
+                  checked={fakePrice}
+                  onChange={(e) => setFakePrice(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <Label htmlFor="fakePrice">Fake Price</Label>
               </div>
 
               {/* Color Variations */}
@@ -488,12 +631,11 @@ export function AddProductModal() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>SKU *</Label>
+                        <Label>SKU (Optional)</Label>
                         <Input
                           value={variation.sku}
                           onChange={(e) => updateColorVariation(variation.id, 'sku', e.target.value)}
-                          placeholder="Unique SKU for this color"
-                          required
+                          placeholder="Optional SKU for this color"
                         />
                       </div>
                       <div className="space-y-2">
@@ -972,6 +1114,11 @@ export function AddProductModal() {
                             className="border-gray-300 rounded-md focus:ring-blue-500"
                             placeholder="0"
                           />
+                          {unitPricings[0]?.secondaryUnitId && (unitPricings[0]?.conversionId || unitPricings[0]?.conversionFactor) && (
+                            <div className="text-xs text-blue-600 font-medium mt-1">
+                              {getConversionFactor()} × {baseStockQuantity} = {baseStockQuantity * getConversionFactor()} {units?.find((u: any) => u._id === unitPricings[0]?.secondaryUnitId)?.abbreviation.toUpperCase() || ""}
+                            </div>
+                          )}
                         </div>
                       </div>
                       
@@ -981,12 +1128,18 @@ export function AddProductModal() {
                       </div>
                       
                       {/* Secondary Unit Column */}
-                      <div className="space-y-4 p-4 border border-gray-200 rounded-md bg-gray-50">
+                      <div className="space-y-4 p-4 border border-blue-200 rounded-md bg-blue-50">
                         <div className="flex items-center justify-between mb-2">
                           <Label className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                            Secondary Unit ({units?.find((u: any) => u._id === unitPricings[0]?.secondaryUnitId)?.abbreviation.toUpperCase()})
+                            Min Unit ({units?.find((u: any) => u._id === unitPricings[0]?.secondaryUnitId)?.abbreviation.toUpperCase()})
                           </Label>
+                          <Badge variant="default" className="bg-blue-600 text-white text-xs">Smallest</Badge>
                         </div>
+                        {unitPricings[0]?.conversionId || unitPricings[0]?.conversionFactor ? (
+                          <div className="text-xs text-blue-700 font-medium mb-2">
+                            1 {baseUnit?.abbreviation.toUpperCase()} = {getConversionFactor()} {units?.find((u: any) => u._id === unitPricings[0]?.secondaryUnitId)?.abbreviation.toUpperCase()}
+                          </div>
+                        ) : null}
                         
                         {/* Purchase Price */}
                         <div className="space-y-1">
@@ -1057,12 +1210,32 @@ export function AddProductModal() {
             </TabsContent>
 
           </Tabs>
+          )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit">Save Product</Button>
+            {!showPreview && (
+              <>
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="secondary" onClick={handlePreview} disabled={isSubmitting}>
+                  Preview
+                </Button>
+                <Button type="submit" disabled={isSubmitting || isCreatingConversion}>
+                  {isSubmitting ? (
+                    <>
+                      <span className="mr-2">Saving...</span>
+                      <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    </>
+                  ) : (
+                    "Save Product"
+                  )}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

@@ -486,6 +486,7 @@ export function EnhancedPurchaseForm({
                         key={lineItem.id}
                         lineItem={lineItem}
                         index={index}
+                        totalLineItems={invoice?.lineItems.length || 0}
                         onUpdate={(idx, updates) =>
                           handleLineItemUpdate(lineItem.id, updates)
                         }

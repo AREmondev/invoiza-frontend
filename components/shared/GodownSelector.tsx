@@ -218,14 +218,14 @@ export function GodownSelector({
         </div>
       ) : (
         <Select
-          value={selectedGodownIds[0] || ''}
-          onValueChange={(value) => onGodownsChange(value ? [value] : [])}
+          value={selectedGodownIds[0] || '__none__'}
+          onValueChange={(value) => onGodownsChange(value === '__none__' ? [] : [value])}
         >
           <SelectTrigger>
             <SelectValue placeholder="Select godown/room" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">None</SelectItem>
+            <SelectItem value="__none__">None</SelectItem>
             {godowns.map((godown: any) => (
               <SelectItem key={godown._id} value={godown._id}>
                 <div className="flex items-center gap-2">

@@ -176,17 +176,17 @@ export function AuditTimeline({
               <div className="space-y-2">
                 <label className="text-sm font-medium">Action</label>
                 <Select
-                  value={filters.action || ''}
+                  value={filters.action || '__all__'}
                   onValueChange={(value) => setFilters({ 
                     ...filters, 
-                    action: value as AuditAction || undefined 
+                    action: value === '__all__' ? undefined : (value as AuditAction)
                   })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="All actions" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All actions</SelectItem>
+                    <SelectItem value="__all__">All actions</SelectItem>
                     <SelectItem value="create">Create</SelectItem>
                     <SelectItem value="update">Update</SelectItem>
                     <SelectItem value="delete">Delete</SelectItem>
@@ -200,17 +200,17 @@ export function AuditTimeline({
               <div className="space-y-2">
                 <label className="text-sm font-medium">User</label>
                 <Select
-                  value={filters.userId || ''}
+                  value={filters.userId || '__all__'}
                   onValueChange={(value) => setFilters({ 
                     ...filters, 
-                    userId: value || undefined 
+                    userId: value === '__all__' ? undefined : value
                   })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="All users" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All users</SelectItem>
+                    <SelectItem value="__all__">All users</SelectItem>
                     {uniqueUsers.map((user) => (
                       <SelectItem key={user.id} value={user.id}>
                         {user.name}
@@ -224,7 +224,7 @@ export function AuditTimeline({
               <div className="space-y-2">
                 <label className="text-sm font-medium">Date Range</label>
                 <Select
-                  value={filters.dateRange ? 'custom' : ''}
+                  value={filters.dateRange ? 'custom' : '__all__'}
                   onValueChange={(value) => {
                     if (value === 'today') {
                       const today = new Date();
@@ -261,7 +261,7 @@ export function AuditTimeline({
                     <SelectValue placeholder="All time" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All time</SelectItem>
+                    <SelectItem value="__all__">All time</SelectItem>
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="week">Last 7 days</SelectItem>
                     <SelectItem value="month">Last 30 days</SelectItem>

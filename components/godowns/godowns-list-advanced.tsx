@@ -1,25 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { GodownsListWithAdvancedTable } from "@/components/godowns/godowns-list-advanced";
+import { useState } from 'react';
+import { useSession } from "next-auth/react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/lib/convex";
+import { AdvancedDataTable, AdvancedColumnDef } from '@/components/ui/advanced-data-table';
+import { Button } from '@/components/ui/button';
+import { Plus, Pencil, Trash } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
 
-export default function GodownsPage() {
-  const [userId] = useState("user-123");
-
-  return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Godowns / Storage Rooms</h1>
-          <p className="text-muted-foreground">
-            Manage storage locations for inventory
-          </p>
-        </div>
-      </div>
-      <GodownsListWithAdvancedTable userId={userId} />
-    </div>
-  );
+interface GodownsListWithAdvancedTableProps {
+  userId: string;
 }
+
+export function GodownsListWithAdvancedTable({ userId }: GodownsListWithAdvancedTableProps) {
   const { data: session } = useSession();
   const userEmail = session?.user?.email;
   const { toast } = useToast();
@@ -125,82 +130,153 @@ export default function GodownsPage() {
     }
   };
 
+  const columns: AdvancedColumnDef<any>[] = [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <input
+          type="checkbox"
+          checked={table.getIsAllPageRowsSelected()}
+          onChange={(e) => table.toggleAllPageRowsSelected(!!e.target.checked)}
+          className="rounded border-gray-300"
+        />
+      ),
+      cell: ({ row }) => (
+        <input
+          type="checkbox"
+          checked={row.getIsSelected()}
+          onChange={(e) => row.toggleSelected(!!e.target.checked)}
+          className="rounded border-gray-300"
+        />
+      ),
+      enableSorting: false,
+      enableColumnFilter: false,
+      size: 40,
+    },
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ row }) => (
+        <div className="font-medium">{row.getValue("name")}</div>
+      ),
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "text",
+        placeholder: "Search by name..."
+      },
+      size: 200,
+    },
+    {
+      accessorKey: "code",
+      header: "Code",
+      cell: ({ row }) => row.getValue("code") || "-",
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "text",
+        placeholder: "Filter by code..."
+      },
+      size: 120,
+    },
+    {
+      accessorKey: "location",
+      header: "Location",
+      cell: ({ row }) => row.getValue("location") || "-",
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "text",
+        placeholder: "Filter by location..."
+      },
+      size: 200,
+    },
+    {
+      accessorKey: "description",
+      header: "Description",
+      cell: ({ row }) => (
+        <div className="max-w-xs truncate">{row.getValue("description") || "-"}</div>
+      ),
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "text",
+        placeholder: "Filter by description..."
+      },
+      size: 300,
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: ({ row }) => {
+        const godown = row.original;
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={() => handleOpenDialog(godown)}
+              title="Edit Godown"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-destructive"
+              onClick={() => handleDelete(godown._id)}
+              title="Delete Godown"
+            >
+              <Trash className="h-3 w-3" />
+            </Button>
+          </div>
+        );
+      },
+      enableSorting: false,
+      enableColumnFilter: false,
+      size: 100,
+    },
+  ];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Godowns / Storage Rooms</h1>
-          <p className="text-muted-foreground">
-            Manage storage locations for inventory
-          </p>
+        <div className="flex items-center gap-4">
+          <h2 className="text-lg font-semibold">Godown Directory</h2>
+          <Badge variant="secondary" className="text-sm">
+            {godowns?.length || 0} godowns
+          </Badge>
         </div>
         <Button onClick={() => handleOpenDialog()}>
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="mr-2 h-4 w-4" />
           Add Godown
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Warehouse className="h-5 w-5" />
-            All Godowns
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {godowns === undefined ? (
-            <div className="text-center py-8 text-muted-foreground">
-              Loading godowns...
-            </div>
-          ) : godowns.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No godowns found. Create your first godown to get started.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {godowns.map((godown: any) => (
-                  <TableRow key={godown._id}>
-                    <TableCell className="font-medium">{godown.name}</TableCell>
-                    <TableCell>{godown.code || "-"}</TableCell>
-                    <TableCell>{godown.location || "-"}</TableCell>
-                    <TableCell className="max-w-xs truncate">
-                      {godown.description || "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenDialog(godown)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(godown._id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {godowns === undefined ? (
+        <div className="text-center py-8 text-muted-foreground">
+          Loading godowns...
+        </div>
+      ) : (
+        <AdvancedDataTable
+          columns={columns}
+          data={godowns || []}
+          tableId="godowns"
+          userId={userId}
+          searchable={true}
+          columnVisibility={true}
+          pagination={true}
+          rowSelection={true}
+          enableGrouping={true}
+          enableExport={true}
+          exportFormats={["csv", "excel"]}
+          enableAdvancedFilters={true}
+          enableMultiSort={true}
+          defaultPageSize={10}
+          pageSizeOptions={[5, 10, 20, 50, 100]}
+        />
+      )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>

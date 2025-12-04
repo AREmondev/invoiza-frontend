@@ -1,5 +1,7 @@
 "use client";
 
+import { useQuery } from "convex/react";
+import { api } from "@/lib/convex";
 import { AdvancedDataTable } from "@/components/ui/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +16,7 @@ import {
 import { format } from "date-fns";
 import type { AdvancedColumnDef } from "@/components/ui/advanced-data-table";
 import type { AuditLog } from "@/types/models";
+import { useMemo } from "react";
 
 interface AuditLogViewerAdvancedProps {
   userId?: string;
@@ -21,107 +24,58 @@ interface AuditLogViewerAdvancedProps {
   entityId?: string;
 }
 
-// Mock data for audit logs
-const auditLogsData: AuditLog[] = [
-  {
-    id: "1",
-    action: "create",
-    entityType: "sale",
-    entityId: "sale_001",
-    userId: "user_001",
-    userName: "John Doe",
-    createdAt: new Date("2024-03-15T10:30:00Z"),
-    updatedAt: new Date("2024-03-15T10:30:00Z"),
-    createdBy: "user_001",
-    updatedBy: "user_001",
-    changes: [
-      { field: "customerId", oldValue: null, newValue: "customer_001", dataType: "string" },
-      { field: "total", oldValue: null, newValue: 1500, dataType: "number" }
-    ],
-    metadata: {
-      ipAddress: "192.168.1.100",
-      userAgent: "Mozilla/5.0...",
-    },
-  },
-  {
-    id: "2",
-    action: "update",
-    entityType: "product",
-    entityId: "product_001",
-    userId: "user_002",
-    userName: "Jane Smith",
-    createdAt: new Date("2024-03-15T11:15:00Z"),
-    updatedAt: new Date("2024-03-15T11:15:00Z"),
-    createdBy: "user_002",
-    updatedBy: "user_002",
-    changes: [
-      { field: "price", oldValue: 100, newValue: 120, dataType: "number" }
-    ],
-    metadata: {
-      ipAddress: "192.168.1.101",
-      userAgent: "Mozilla/5.0...",
-    },
-  },
-  {
-    id: "3",
-    action: "delete",
-    entityType: "customer",
-    entityId: "customer_002",
-    userId: "user_001",
-    userName: "John Doe",
-    createdAt: new Date("2024-03-15T14:20:00Z"),
-    updatedAt: new Date("2024-03-15T14:20:00Z"),
-    createdBy: "user_001",
-    updatedBy: "user_001",
-    changes: [
-      { field: "name", oldValue: "Test Customer", newValue: null, dataType: "string" },
-      { field: "email", oldValue: "test@example.com", newValue: null, dataType: "string" }
-    ],
-    metadata: {
-      ipAddress: "192.168.1.100",
-      userAgent: "Mozilla/5.0...",
-    },
-  },
-  {
-    id: "4",
-    action: "create",
-    entityType: "user",
-    entityId: "user_003",
-    userId: "user_003",
-    userName: "Bob Johnson",
-    createdAt: new Date("2024-03-15T16:45:00Z"),
-    updatedAt: new Date("2024-03-15T16:45:00Z"),
-    createdBy: "user_003",
-    updatedBy: "user_003",
-    changes: [],
-    metadata: {
-      ipAddress: "192.168.1.102",
-      userAgent: "Mozilla/5.0...",
-    },
-  },
-  {
-    id: "5",
-    action: "update",
-    entityType: "sale",
-    entityId: "sale_002",
-    userId: "user_002",
-    userName: "Jane Smith",
-    createdAt: new Date("2024-03-15T18:30:00Z"),
-    updatedAt: new Date("2024-03-15T18:30:00Z"),
-    createdBy: "user_002",
-    updatedBy: "user_002",
-    changes: [
-      { field: "agreedPrice", oldValue: 200, newValue: 180, dataType: "number" }
-    ],
-    metadata: {
-      ipAddress: "192.168.1.101",
-      userAgent: "Mozilla/5.0...",
-      violationType: "below_agreement",
-    },
-  },
-];
-
 export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLogViewerAdvancedProps) {
+  // Build query args - only include userId if it's a valid Convex ID format
+  // Convex IDs are strings that don't contain hyphens or spaces
+  const queryArgs = useMemo(() => {
+    const args: any = { limit: 1000 };
+    
+    if (entityType && entityId) {
+      args.entityType = entityType;
+      args.entityId = entityId;
+    } else if (entityType) {
+      args.entityType = entityType;
+    } else if (userId && !userId.includes("-") && !userId.includes(" ") && userId.length > 5) {
+      // Only pass userId if it looks like a Convex ID (no hyphens/spaces, reasonable length)
+      // This filters out strings like "current-user"
+      args.userId = userId as any;
+    }
+    
+    return args;
+  }, [userId, entityType, entityId]);
+
+  // Fetch audit logs from Convex
+  const convexLogs = useQuery(
+    api.queries.auditLogs.getAuditLogs,
+    queryArgs
+  );
+
+  // Transform Convex audit logs to match AuditLog type
+  const auditLogsData: AuditLog[] = useMemo(() => {
+    if (!convexLogs) return [];
+
+    return convexLogs.map((log) => ({
+      id: log._id,
+      action: log.action as AuditLog["action"],
+      entityType: log.entityType,
+      entityId: log.entityId,
+      userId: log.userId,
+      userName: log.userName,
+      createdAt: new Date(log.timestamp),
+      updatedAt: new Date(log.updatedAt),
+      createdBy: log.userId,
+      updatedBy: log.userId,
+      changes: log.changes.map((change) => ({
+        field: change.field,
+        oldValue: change.oldValue,
+        newValue: change.newValue,
+        dataType: change.dataType,
+      })),
+      metadata: log.metadata || {},
+      ipAddress: log.ipAddress,
+      userAgent: log.userAgent,
+    }));
+  }, [convexLogs]);
   
   const getActionBadgeVariant = (action: string) => {
     switch (action) {
@@ -144,7 +98,10 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
     {
       accessorKey: "createdAt",
       header: "Timestamp",
-      cell: ({ row }) => format(new Date(row.getValue("createdAt")), "MMM dd, yyyy HH:mm"),
+      cell: ({ row }) => {
+        const date = row.getValue("createdAt") as Date;
+        return format(date, "MMM dd, yyyy HH:mm");
+      },
       filterConfig: {
         type: "date",
         placeholder: "Filter by date"
@@ -187,8 +144,12 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
       filterConfig: {
         type: "select",
         options: [
-          { label: "Sale", value: "sale" },
           { label: "Product", value: "product" },
+          { label: "Brand", value: "brand" },
+          { label: "Category", value: "category" },
+          { label: "Unit", value: "unit" },
+          { label: "Godown", value: "godown" },
+          { label: "Sale", value: "sale" },
           { label: "Customer", value: "customer" },
           { label: "User", value: "user" }
         ],
@@ -291,25 +252,39 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
     URL.revokeObjectURL(url);
   };
 
+  if (convexLogs === undefined) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-muted-foreground">Loading audit logs...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <AdvancedDataTable
-        columns={columns as AdvancedColumnDef<unknown, unknown>[]}
-        data={auditLogsData}
-        tableId="audit-logs"
-        userId={userId ?? "default"}
-        searchable={true}
-        columnVisibility={true}
-        pagination={true}
-        rowSelection={true}
-        enableGrouping={true}
-        enableExport={true}
-        exportFormats={["csv", "excel"]}
-        enableAdvancedFilters={true}
-        enableMultiSort={true}
-        defaultPageSize={10}
-        pageSizeOptions={[5, 10, 25, 50, 100]}
-      />
+      {auditLogsData.length === 0 ? (
+        <div className="flex items-center justify-center p-8">
+          <div className="text-muted-foreground">No audit logs found</div>
+        </div>
+      ) : (
+        <AdvancedDataTable
+          columns={columns as AdvancedColumnDef<unknown, unknown>[]}
+          data={auditLogsData}
+          tableId="audit-logs"
+          userId={userId ?? "default"}
+          searchable={true}
+          columnVisibility={true}
+          pagination={true}
+          rowSelection={true}
+          enableGrouping={true}
+          enableExport={true}
+          exportFormats={["csv", "excel"]}
+          enableAdvancedFilters={true}
+          enableMultiSort={true}
+          defaultPageSize={10}
+          pageSizeOptions={[5, 10, 25, 50, 100]}
+        />
+      )}
     </div>
   );
 }
