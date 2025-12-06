@@ -139,35 +139,37 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
       }
     },
     {
-      id: "actions",
+      accessorKey: "paymentStatus",
+      header: "Actions",
       cell: ({ row }) => {
         const sale = row.original;
         
         return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => handleEdit(sale.id)}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(sale._id, sale.id)}>
-                <Trash className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-              {sale.whatsapp && (
-                <DropdownMenuItem onClick={() => handleWhatsAppShare(sale.whatsapp, sale.id, sale.amount)}>
-                  <MessageCircle className="mr-2 h-4 w-4" />
-                  WhatsApp
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-3 mt-2">
+
+          {/* Delete Button */}
+          <button
+            onClick={() => handleDelete(sale._id, sale.id)}
+            className="flex items-center gap-1 text-red-600 hover:text-red-700"
+          >
+            <Trash className="h-4 w-4" />
+            <span>Delete</span>
+          </button>
+        
+          {/* WhatsApp Button */}
+          {sale.whatsapp && (
+            <button
+              onClick={() =>
+                handleWhatsAppShare(sale.whatsapp, sale.id, sale.amount)
+              }
+              className="flex items-center gap-1 text-green-600 hover:text-green-700"
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span>WhatsApp</span>
+            </button>
+          )}
+        
+        </div>
         );
       },
     },

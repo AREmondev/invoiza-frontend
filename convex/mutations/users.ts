@@ -14,6 +14,7 @@ export const createUser = mutation({
     isActive: v.optional(v.boolean()),
     authProvider: v.union(v.literal("email"), v.literal("google"), v.literal("github")),
     authProviderId: v.string(),
+    passwordHash: v.optional(v.string()), // Hashed password (hashed on client using action)
     userEmail: v.optional(v.string()), // Email of current user (from NextAuth session)
   },
   handler: async (ctx, args) => {
@@ -76,6 +77,7 @@ export const createUser = mutation({
       emailVerified: false,
       authProvider: args.authProvider,
       authProviderId: args.authProviderId,
+      passwordHash: args.passwordHash, // Store hashed password if provided
       isActive: args.isActive ?? true,
       isSuperAdmin: false,
       createdAt: Date.now(),
@@ -122,6 +124,8 @@ export const updateUser = mutation({
     name: v.optional(v.string()),
     isActive: v.optional(v.boolean()),
     roleIds: v.optional(v.array(v.id("roles"))),
+    passwordHash: v.optional(v.string()), // Hashed password (hashed on client using action)
+    userEmail: v.optional(v.string()), // Email of current user (from NextAuth session)
   },
   handler: async (ctx, args) => {
     // Get current user - try Convex Auth first, then fallback to email lookup
@@ -139,8 +143,13 @@ export const updateUser = mutation({
       // Convex Auth not configured, use email from args
     }
 
-    // Fallback: Use email from args (NextAuth session) - but updateUser doesn't have userEmail arg yet
-    // For now, we'll require Convex Auth or add userEmail to args later
+    // Fallback: Use email from args (NextAuth session)
+    if (!currentUser && args.userEmail) {
+      currentUser = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", args.userEmail!))
+        .first();
+    }
 
     if (!currentUser) {
       throw new Error("Not authenticated");
@@ -178,6 +187,15 @@ export const updateUser = mutation({
       changes.isActive = args.isActive;
       await ctx.db.patch(args.userId, {
         isActive: args.isActive,
+        updatedAt: Date.now(),
+      });
+    }
+
+    // Update password if provided
+    if (args.passwordHash !== undefined) {
+      changes.passwordUpdated = true; // Don't log actual password hash
+      await ctx.db.patch(args.userId, {
+        passwordHash: args.passwordHash,
         updatedAt: Date.now(),
       });
     }

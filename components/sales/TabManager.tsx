@@ -140,19 +140,7 @@ export function TabManager() {
           >
             {tab.type === "list" ? (
               <div>
-                <div className="flex justify-between items-center mb-4">
-                  <Button onClick={handleAddSaleClick}>
-                    Add Sale
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setUseAdvancedTable(!useAdvancedTable)}
-                  >
-                    <Settings className="h-4 w-4 mr-2" />
-                    {useAdvancedTable ? "Use Basic Table" : "Use Advanced Table"}
-                  </Button>
-                </div>
+                
                 {useAdvancedTable ? (
                   <SalesListAdvanced userId="current-user" />
                 ) : (

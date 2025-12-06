@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { api } from "@/lib/convex";
-import { Plus, Edit, Trash2, Save, Shield, Key } from "lucide-react";
+import { Plus, Edit, Trash2, Save, Shield, Key, User, Mail, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,12 +13,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PermissionGuard } from "@/components/rbac/PermissionGuard";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DialogDescription } from "@radix-ui/react-dialog";
 
 interface RolePermissionManagerProps {
   compact?: boolean;
@@ -30,8 +33,10 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
   const [showRoleDialog, setShowRoleDialog] = useState(false);
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [editingRole, setEditingRole] = useState<any>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'role' | 'permission', id: string } | null>(null);
-
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'role' | 'permission' | 'user', id: string } | null>(null);
+  const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("roles");
 
   
   // Convex queries
@@ -46,6 +51,10 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
     api.queries.permissions.getAllPermissions,
     userEmail ? { userEmail } : "skip"
   );
+  const users = useQuery(
+    api.queries.users.getUsers,
+    userEmail ? { userEmail } : "skip"
+  );
   
   // Convex mutations
   const createRole = useMutation(api.mutations.roles.createRole);
@@ -53,6 +62,10 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
   const deleteRole = useMutation(api.mutations.roles.deleteRole);
   const assignPermission = useMutation(api.mutations.permissions.assignPermissionToRole);
   const revokePermission = useMutation(api.mutations.permissions.revokePermissionFromRole);
+  const createUser = useMutation(api.mutations.users.createUser);
+  const updateUser = useMutation(api.mutations.users.updateUser);
+  const deleteUser = useMutation(api.mutations.users.deleteUser);
+  const hashPassword = useAction(api.actions.auth.hashPassword);
 
   const handleSaveRole = async (roleData: {
     name: string;
@@ -207,6 +220,116 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
     return role.permissions.some((p: any) => p._id === permId);
   };
 
+  // User management handlers
+  const handleCreateUser = async (data: {
+    email: string;
+    name: string;
+    password?: string;
+    roleIds: string[];
+    isActive: boolean;
+  }) => {
+    if (!currentUser) {
+      toast({
+        title: "Error",
+        description: "You must be logged in to create users",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Hash password if provided
+      let passwordHash: string | undefined;
+      if (data.password && data.password.trim()) {
+        const result = await hashPassword({ password: data.password });
+        passwordHash = result.hash;
+      }
+
+      await createUser({
+        email: data.email,
+        name: data.name,
+        organizationId: currentUser.organizationId,
+        roleIds: data.roleIds as any,
+        isActive: data.isActive,
+        authProvider: "email",
+        authProviderId: data.email,
+        passwordHash: passwordHash,
+        userEmail: userEmail || undefined,
+      });
+
+      toast({
+        title: "Success",
+        description: "User created successfully",
+      });
+      setIsCreateUserDialogOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateUser = async (userId: string, data: {
+    name?: string;
+    password?: string;
+    roleIds?: string[];
+    isActive?: boolean;
+  }) => {
+    try {
+      // Hash password if provided
+      let passwordHash: string | undefined;
+      if (data.password && data.password.trim()) {
+        const result = await hashPassword({ password: data.password });
+        passwordHash = result.hash;
+      }
+
+      await updateUser({
+        userId: userId as any,
+        name: data.name,
+        passwordHash: passwordHash,
+        roleIds: data.roleIds as any,
+        isActive: data.isActive,
+        userEmail: userEmail || undefined,
+      });
+
+      toast({
+        title: "Success",
+        description: "User updated successfully",
+      });
+      setSelectedUserId(null);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      await deleteUser({ userId: userId as any });
+      toast({
+        title: "Success",
+        description: "User deleted successfully",
+      });
+      setDeleteConfirm(null);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Super admins can do everything
+  const canCreateUser = isSuperAdmin || hasPermission("users", "create");
+  const canEditUser = isSuperAdmin || hasPermission("users", "edit");
+  const canDeleteUser = isSuperAdmin || hasPermission("users", "delete");
+
   // Super admins can always view
   if (!isSuperAdmin && !hasPermission("roles", "view") && !hasPermission("permissions", "view")) {
     return (
@@ -260,189 +383,311 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
         <div>
           <h2 className="text-2xl font-bold">Roles & Permissions</h2>
           <p className="text-muted-foreground">
-            Manage user roles and permissions for the system
+            Manage users, roles, and permissions for the system
           </p>
-        </div>
-        <div className="flex gap-2">
-          {(isSuperAdmin || hasPermission("roles", "create")) && (
-            <Button
-              onClick={() => {
-                setEditingRole(null);
-                setShowRoleDialog(true);
-              }}
-            >
-              <Shield className="h-4 w-4 mr-2" />
-              New Role
-            </Button>
-          )}
         </div>
       </div>
 
-      {/* Roles Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Roles</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {roles === undefined ? (
-            <div className="text-center py-8">Loading...</div>
-          ) : roles.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No roles found. Create your first role to get started.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Display Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Permissions</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="w-[100px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {roles.map((role: any) => (
-                  <TableRow key={role._id}>
-                    <TableCell className="font-mono">{role.name}</TableCell>
-                    <TableCell>{role.displayName}</TableCell>
-                    <TableCell>{role.description || "-"}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {role.permissions?.length || 0} permissions
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={role.isActive ? "default" : "secondary"}>
-                        {role.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={role.type === "system" ? "default" : "outline"}>
-                        {role.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {(isSuperAdmin || hasPermission("roles", "edit")) && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditingRole(role);
-                              setShowRoleDialog(true);
-                            }}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {role.type !== "system" && (isSuperAdmin || hasPermission("roles", "delete")) && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeleteConfirm({ type: "role", id: role._id })}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="users">
+            <Users className="h-4 w-4 mr-2" />
+            Users
+          </TabsTrigger>
+          <TabsTrigger value="roles">
+            <Shield className="h-4 w-4 mr-2" />
+            Roles
+          </TabsTrigger>
+          <TabsTrigger value="permissions">
+            <Key className="h-4 w-4 mr-2" />
+            Permissions
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Permissions Matrix */}
-      {permissions && permissions.length > 0 && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Permission Matrix</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Toggle permissions for each role. Permissions are grouped by category.
-                </p>
+        {/* Users Tab */}
+        <TabsContent value="users" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>Users</CardTitle>
+                {canCreateUser && (
+                  <Button
+                    onClick={() => setIsCreateUserDialogOpen(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add User
+                  </Button>
+                )}
               </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto border rounded-lg">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[300px]">Permission</TableHead>
-                    {roles?.filter((r: any) => r.isActive).map((role: any) => (
-                      <TableHead key={role._id} className="text-center min-w-[120px]">
-                        <div className="flex flex-col items-center gap-1">
-                          <p className="font-medium text-sm">{role.displayName}</p>
-                          <Badge variant="outline" className="text-xs">
-                            {role.permissions?.length || 0}
+            </CardHeader>
+            <CardContent>
+              {users === undefined ? (
+                <div className="text-center py-8">Loading...</div>
+              ) : users.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No users found. Create your first user to get started.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Roles</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="w-[100px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users.map((user: any) => (
+                      <TableRow key={user._id}>
+                        <TableCell className="font-medium">{user.name}</TableCell>
+                        <TableCell>{user.email}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {user.roles?.map((role: any) => (
+                              <Badge key={role._id} variant="secondary">
+                                {role.displayName}
+                              </Badge>
+                            ))}
+                            {user.isSuperAdmin && (
+                              <Badge variant="default">
+                                <Shield className="h-3 w-3 mr-1" />
+                                Super Admin
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.isActive ? "default" : "secondary"}>
+                            {user.isActive ? "Active" : "Inactive"}
                           </Badge>
-                        </div>
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {Object.entries(groupedPermissions).map(([category, categoryPermissions]) => {
-                    const perms = categoryPermissions as any[];
-                    return (
-                    <>
-                      <TableRow key={category} className="bg-muted/50">
-                        <TableCell colSpan={(roles?.filter((r: any) => r.isActive).length || 0) + 1} className="font-semibold py-3">
-                          <div className="flex items-center gap-2">
-                            <Key className="h-4 w-4" />
-                            {category}
+                        </TableCell>
+                        <TableCell>
+                          {user.isSuperAdmin ? (
+                            <Badge variant="destructive">Super Admin</Badge>
+                          ) : (
+                            <Badge variant="outline">User</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {canEditUser && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setSelectedUserId(user._id)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {canDeleteUser && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeleteConfirm({ type: "user", id: user._id })}
+                                disabled={user._id === currentUser?._id}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
-                      {perms.map((permission: any) => (
-                        <TableRow key={permission._id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium text-sm">{permission.displayName}</p>
-                              <p className="text-xs text-muted-foreground font-mono">
-                                {permission.module}:{permission.action}
-                                {permission.customAction && `:${permission.customAction}`}
-                              </p>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Roles Tab */}
+        <TabsContent value="roles" className="space-y-4">
+          <div className="flex justify-end">
+            {(isSuperAdmin || hasPermission("roles", "create")) && (
+              <Button
+                onClick={() => {
+                  setEditingRole(null);
+                  setShowRoleDialog(true);
+                }}
+              >
+                <Shield className="h-4 w-4 mr-2" />
+                New Role
+              </Button>
+            )}
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Roles</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {roles === undefined ? (
+                <div className="text-center py-8">Loading...</div>
+              ) : roles.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No roles found. Create your first role to get started.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Display Name</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Permissions</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="w-[100px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {roles.map((role: any) => (
+                      <TableRow key={role._id}>
+                        <TableCell className="font-mono">{role.name}</TableCell>
+                        <TableCell>{role.displayName}</TableCell>
+                        <TableCell>{role.description || "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">
+                            {role.permissions?.length || 0} permissions
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={role.isActive ? "default" : "secondary"}>
+                            {role.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={role.type === "system" ? "default" : "outline"}>
+                            {role.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {(isSuperAdmin || hasPermission("roles", "edit")) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setEditingRole(role);
+                                  setShowRoleDialog(true);
+                                }}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {role.type !== "system" && (isSuperAdmin || hasPermission("roles", "delete")) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeleteConfirm({ type: "role", id: role._id })}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Permissions Tab */}
+        <TabsContent value="permissions" className="space-y-4">
+          {permissions && permissions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Permission Matrix</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Toggle permissions for each role. Permissions are grouped by category.
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto border rounded-lg">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[300px]">Permission</TableHead>
+                        {roles?.filter((r: any) => r.isActive).map((role: any) => (
+                          <TableHead key={role._id} className="text-center min-w-[120px]">
+                            <div className="flex flex-col items-center gap-1">
+                              <p className="font-medium text-sm">{role.displayName}</p>
+                              <Badge variant="outline" className="text-xs">
+                                {role.permissions?.length || 0}
+                              </Badge>
                             </div>
-                          </TableCell>
-                          {roles?.filter((r: any) => r.isActive).map((role: any) => (
-                            <TableCell key={role._id} className="text-center">
-                              {(isSuperAdmin || hasPermission("roles", "edit")) ? (
-                                <Switch
-                                  checked={roleHasPermission(role, permission)}
-                                  onCheckedChange={(checked) =>
-                                    toggleRolePermission(role._id, permission._id, !checked)
-                                  }
-                                />
-                              ) : (
-                                <div className="flex justify-center">
-                                  {roleHasPermission(role, permission) ? (
-                                    <Badge variant="default" className="text-xs">✓</Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="text-xs">-</Badge>
-                                  )}
-                                </div>
-                              )}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Object.entries(groupedPermissions).map(([category, categoryPermissions]) => {
+                        const perms = categoryPermissions as any[];
+                        return (
+                        <>
+                          <TableRow key={category} className="bg-muted/50">
+                            <TableCell colSpan={(roles?.filter((r: any) => r.isActive).length || 0) + 1} className="font-semibold py-3">
+                              <div className="flex items-center gap-2">
+                                <Key className="h-4 w-4" />
+                                {category}
+                              </div>
                             </TableCell>
+                          </TableRow>
+                          {perms.map((permission: any) => (
+                            <TableRow key={permission._id}>
+                              <TableCell>
+                                <div>
+                                  <p className="font-medium text-sm">{permission.displayName}</p>
+                                  <p className="text-xs text-muted-foreground font-mono">
+                                    {permission.module}:{permission.action}
+                                    {permission.customAction && `:${permission.customAction}`}
+                                  </p>
+                                </div>
+                              </TableCell>
+                              {roles?.filter((r: any) => r.isActive).map((role: any) => (
+                                <TableCell key={role._id} className="text-center">
+                                  {(isSuperAdmin || hasPermission("roles", "edit")) ? (
+                                    <Switch
+                                      checked={roleHasPermission(role, permission)}
+                                      onCheckedChange={(checked) =>
+                                        toggleRolePermission(role._id, permission._id, !checked)
+                                      }
+                                    />
+                                  ) : (
+                                    <div className="flex justify-center">
+                                      {roleHasPermission(role, permission) ? (
+                                        <Badge variant="default" className="text-xs">✓</Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-xs">-</Badge>
+                                      )}
+                                    </div>
+                                  )}
+                                </TableCell>
+                              ))}
+                            </TableRow>
                           ))}
-                        </TableRow>
-                      ))}
-                    </>
-                  );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                        </>
+                      );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Role Dialog */}
       <Dialog open={showRoleDialog} onOpenChange={setShowRoleDialog}>
@@ -462,12 +707,51 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
         </DialogContent>
       </Dialog>
 
+      {/* Create User Dialog */}
+      <Dialog open={isCreateUserDialogOpen} onOpenChange={setIsCreateUserDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create New User</DialogTitle>
+            <DialogDescription>
+              Add a new user to your organization.
+            </DialogDescription>
+          </DialogHeader>
+          <UserForm
+            onSubmit={handleCreateUser}
+            roles={roles || []}
+            onCancel={() => setIsCreateUserDialogOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User Dialog */}
+      {selectedUserId && (
+        <Dialog open={!!selectedUserId} onOpenChange={(open) => !open && setSelectedUserId(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit User</DialogTitle>
+              <DialogDescription>
+                Update user information and roles.
+              </DialogDescription>
+            </DialogHeader>
+            <EditUserForm
+              user={users?.find((u: any) => u._id === selectedUserId)}
+              roles={roles || []}
+              onSubmit={(data) => {
+                handleUpdateUser(selectedUserId, data);
+              }}
+              onCancel={() => setSelectedUserId(null)}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+
       {/* Delete Confirmation */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {deleteConfirm?.type === "role" ? "Role" : "Permission"}?
+              Delete {deleteConfirm?.type === "role" ? "Role" : deleteConfirm?.type === "user" ? "User" : "Permission"}?
             </AlertDialogTitle>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -477,6 +761,8 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
                 if (deleteConfirm) {
                   if (deleteConfirm.type === "role") {
                     handleDeleteRole(deleteConfirm.id);
+                  } else if (deleteConfirm.type === "user") {
+                    handleDeleteUser(deleteConfirm.id);
                   }
                 }
               }}
@@ -683,6 +969,201 @@ function RoleForm({ role, permissions, onSave, onCancel }: RoleFormProps) {
           <Save className="h-4 w-4 mr-2" />
           Save Role
         </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+// User Form Components
+interface UserFormProps {
+  onSubmit: (data: {
+    email: string;
+    name: string;
+    password?: string;
+    roleIds: string[];
+    isActive: boolean;
+  }) => void;
+  roles: Array<{ _id: string; name: string; displayName: string }>;
+  onCancel: () => void;
+}
+
+function UserForm({ onSubmit, roles, onCancel }: UserFormProps) {
+  const [formData, setFormData] = useState({
+    email: "",
+    name: "",
+    password: "",
+    roleIds: [] as string[],
+    isActive: true,
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="email">Email *</Label>
+        <Input
+          id="email"
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="name">Name *</Label>
+        <Input
+          id="name"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+          placeholder="Leave empty to set later"
+        />
+        <p className="text-xs text-muted-foreground">
+          Set a password for email authentication. Leave empty if user will use OAuth.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="roles">Roles</Label>
+        <Select
+          value={formData.roleIds[0] || ""}
+          onValueChange={(value) =>
+            setFormData({ ...formData, roleIds: value ? [value] : [] })
+          }
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select role" />
+          </SelectTrigger>
+          <SelectContent>
+            {roles.map((role) => (
+              <SelectItem key={role._id} value={role._id}>
+                {role.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label htmlFor="isActive">Active</Label>
+        <Switch
+          id="isActive"
+          checked={formData.isActive}
+          onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+        />
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">Create User</Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+interface EditUserFormProps {
+  user: any;
+  roles: Array<{ _id: string; name: string; displayName: string }>;
+  onSubmit: (data: {
+    name?: string;
+    password?: string;
+    roleIds?: string[];
+    isActive?: boolean;
+  }) => void;
+  onCancel: () => void;
+}
+
+function EditUserForm({ user, roles, onSubmit, onCancel }: EditUserFormProps) {
+  const [formData, setFormData] = useState({
+    name: user?.name || "",
+    password: "",
+    roleIds: user?.roles?.map((r: any) => r._id) || [],
+    isActive: user?.isActive ?? true,
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="name">Name *</Label>
+        <Input
+          id="name"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="password">New Password</Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+          placeholder="Leave empty to keep current password"
+        />
+        <p className="text-xs text-muted-foreground">
+          Enter a new password to change it. Leave empty to keep the current password.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="roles">Roles</Label>
+        <Select
+          value={formData.roleIds[0] || ""}
+          onValueChange={(value) =>
+            setFormData({ ...formData, roleIds: value ? [value] : [] })
+          }
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select role" />
+          </SelectTrigger>
+          <SelectContent>
+            {roles.map((role) => (
+              <SelectItem key={role._id} value={role._id}>
+                {role.displayName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label htmlFor="isActive">Active</Label>
+        <Switch
+          id="isActive"
+          checked={formData.isActive}
+          onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+        />
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">Save Changes</Button>
       </DialogFooter>
     </form>
   );

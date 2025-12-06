@@ -89,6 +89,7 @@ export function DataTable<TData, TValue>({
   const [columnSearch, setColumnSearch] = React.useState<
     Record<string, string>
   >({});
+  const [isInitialLoad, setIsInitialLoad] = React.useState(true);
 
   // Load preferences from localStorage
   React.useEffect(() => {
@@ -111,10 +112,14 @@ export function DataTable<TData, TValue>({
         console.warn("Failed to load table preferences:", error);
       }
     }
+    // Mark initial load as complete after a short delay to allow state to settle
+    setTimeout(() => setIsInitialLoad(false), 100);
   }, [tableId, userId]);
 
-  // Save preferences to localStorage
+  // Save preferences to localStorage (skip during initial load)
   React.useEffect(() => {
+    if (isInitialLoad) return;
+    
     const storageKey = `table-preferences-${userId}-${tableId}`;
     const preferences = {
       columnVisibility,
@@ -123,7 +128,7 @@ export function DataTable<TData, TValue>({
       timestamp: new Date().toISOString(),
     };
     localStorage.setItem(storageKey, JSON.stringify(preferences));
-  }, [columnVisibility, sorting, columnFilters, tableId, userId]);
+  }, [columnVisibility, sorting, columnFilters, tableId, userId, isInitialLoad]);
 
   const table = useReactTable({
     data,

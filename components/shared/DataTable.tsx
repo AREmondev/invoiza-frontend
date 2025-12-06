@@ -79,10 +79,16 @@ export function DataTable<TData>({
   const [rowSelection, setRowSelection] = React.useState({});
   const [grouping, setGrouping] = React.useState<GroupingState>(initialPrefs.grouping || []);
   const [pageSize, setPageSize] = React.useState(initialPrefs.pageSize || pageSizeOptions[0]);
+  const [isInitialLoad, setIsInitialLoad] = React.useState(true);
 
-  // Save preferences when they change
+  // Mark initial load as complete after state is settled
   React.useEffect(() => {
-    if (enablePreferences) {
+    setTimeout(() => setIsInitialLoad(false), 100);
+  }, []);
+
+  // Save preferences when they change (skip during initial load)
+  React.useEffect(() => {
+    if (enablePreferences && !isInitialLoad) {
       savePreferences({
         globalFilter,
         columnFilters,
@@ -92,7 +98,7 @@ export function DataTable<TData>({
         pageSize,
       });
     }
-  }, [globalFilter, columnFilters, sorting, columnVisibility, grouping, pageSize, enablePreferences, savePreferences]);
+  }, [globalFilter, columnFilters, sorting, columnVisibility, grouping, pageSize, enablePreferences, savePreferences, isInitialLoad]);
 
   const table = useReactTable({
     data,

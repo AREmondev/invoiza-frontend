@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { api } from "@/lib/convex";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +45,7 @@ export function UserManagement() {
   const createUser = useMutation(api.mutations.users.createUser);
   const updateUser = useMutation(api.mutations.users.updateUser);
   const deleteUser = useMutation(api.mutations.users.deleteUser);
+  const hashPassword = useAction(api.actions.auth.hashPassword);
 
   // Super admins can do everything
   const canCreate = isSuperAdmin || hasPermission("users", "create");
@@ -54,6 +55,7 @@ export function UserManagement() {
   const handleCreateUser = async (data: {
     email: string;
     name: string;
+    password?: string;
     roleIds: string[];
     isActive: boolean;
   }) => {
@@ -67,6 +69,13 @@ export function UserManagement() {
     }
 
     try {
+      // Hash password if provided
+      let passwordHash: string | undefined;
+      if (data.password && data.password.trim()) {
+        const result = await hashPassword({ password: data.password });
+        passwordHash = result.hash;
+      }
+
       await createUser({
         email: data.email,
         name: data.name,
@@ -75,6 +84,7 @@ export function UserManagement() {
         isActive: data.isActive,
         authProvider: "email",
         authProviderId: data.email, // In real app, use proper auth ID
+        passwordHash: passwordHash,
         userEmail: userEmail || undefined, // Pass current user email for authentication
       });
 
@@ -94,14 +104,25 @@ export function UserManagement() {
 
   const handleUpdateUser = async (userId: string, data: {
     name?: string;
+    password?: string;
     roleIds?: string[];
     isActive?: boolean;
   }) => {
     try {
+      // Hash password if provided
+      let passwordHash: string | undefined;
+      if (data.password && data.password.trim()) {
+        const result = await hashPassword({ password: data.password });
+        passwordHash = result.hash;
+      }
+
       await updateUser({
         userId: userId as any,
-        ...data,
+        name: data.name,
+        passwordHash: passwordHash,
         roleIds: data.roleIds as any,
+        isActive: data.isActive,
+        userEmail: userEmail || undefined, // Pass current user email for authentication
       });
 
       toast({
@@ -283,6 +304,7 @@ interface UserFormProps {
   onSubmit: (data: {
     email: string;
     name: string;
+    password?: string;
     roleIds: string[];
     isActive: boolean;
   }) => void;
@@ -294,6 +316,7 @@ function UserForm({ onSubmit, roles, onCancel }: UserFormProps) {
   const [formData, setFormData] = useState({
     email: "",
     name: "",
+    password: "",
     roleIds: [] as string[],
     isActive: true,
   });
@@ -324,6 +347,20 @@ function UserForm({ onSubmit, roles, onCancel }: UserFormProps) {
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           required
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+          placeholder="Leave empty to set later"
+        />
+        <p className="text-xs text-muted-foreground">
+          Set a password for email authentication. Leave empty if user will use OAuth.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -362,6 +399,7 @@ interface EditUserFormProps {
   roles: Array<{ _id: string; name: string; displayName: string }>;
   onSubmit: (data: {
     name?: string;
+    password?: string;
     roleIds?: string[];
     isActive?: boolean;
   }) => void;
@@ -371,6 +409,7 @@ interface EditUserFormProps {
 function EditUserForm({ user, roles, onSubmit, onCancel }: EditUserFormProps) {
   const [formData, setFormData] = useState({
     name: user?.name || "",
+    password: "",
     roleIds: user?.roles?.map((r: any) => r._id) || [],
     isActive: user?.isActive ?? true,
   });
@@ -390,6 +429,20 @@ function EditUserForm({ user, roles, onSubmit, onCancel }: EditUserFormProps) {
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           required
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="password">New Password</Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+          placeholder="Leave empty to keep current password"
+        />
+        <p className="text-xs text-muted-foreground">
+          Enter a new password to change it. Leave empty to keep the current password.
+        </p>
       </div>
 
       <div className="space-y-2">

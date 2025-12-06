@@ -81,3 +81,55 @@ export const getCustomer = query({
   },
 });
 
+/**
+ * Get customer sales history
+ */
+export const getCustomerSalesHistory = query({
+  args: {
+    customerId: v.id("customers"),
+    userEmail: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    // Get current user
+    let currentUser = null;
+    try {
+      const identity = await ctx.auth.getUserIdentity();
+      if (identity?.email) {
+        currentUser = await ctx.db
+          .query("users")
+          .withIndex("by_email", (q) => q.eq("email", identity.email!))
+          .first();
+      }
+    } catch {}
+
+    if (!currentUser && args.userEmail) {
+      currentUser = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", args.userEmail!))
+        .first();
+    }
+
+    if (!currentUser) {
+      return [];
+    }
+
+    // Get customer and verify access
+    const customer = await ctx.db.get(args.customerId);
+    if (!customer || customer.organizationId !== currentUser.organizationId) {
+      return [];
+    }
+
+    // Get all sales invoices for this customer
+    const invoices = await ctx.db
+      .query("invoices")
+      .withIndex("by_customer", (q) => q.eq("customerId", args.customerId))
+      .filter((q) => q.eq(q.field("type"), "sale"))
+      .order("desc")
+      .collect();
+
+    const limit = args.limit || 50;
+    return invoices.slice(0, limit);
+  },
+});
+

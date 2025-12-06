@@ -47,7 +47,7 @@ const saleFormSchema = z.object({
   invoiceDate: z.date(),
   dueDate: z.date().optional(),
   paymentMethod: z.string().min(1, 'Payment method is required'),
-  paymentAmount: z.number().min(0).optional(), // Payment amount in cents
+  paymentAmount: z.coerce.number().int().min(0).optional(), // Payment amount as whole number (will be converted to cents)
   paymentStatus: z.enum(['pending', 'partial', 'paid', 'overpaid']),
   discountType: z.enum(['percentage', 'fixed']),
   discountValue: z.number().min(0).max(100),
@@ -192,7 +192,7 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
       billingName: '',
       invoiceDate: new Date(),
       paymentMethod: preferences?.lastUsedPaymentMethod || 'cash',
-      paymentAmount: 0,
+      paymentAmount: 0, // Whole number, will be converted to cents when saving
       paymentStatus: 'pending',
       discountType: 'percentage',
       discountValue: 0,
@@ -256,6 +256,20 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
   }, [subtotal, tabId, updateTotal]);
 
   // Don't auto-add line item - start with empty form
+
+  // Update payment status when payment amount changes
+  useEffect(() => {
+    const paymentAmount = form.watch('paymentAmount') || 0;
+    const paymentAmountCents = paymentAmount * 100;
+    
+    if (paymentAmountCents >= total) {
+      form.setValue('paymentStatus', paymentAmountCents > total ? 'overpaid' : 'paid');
+    } else if (paymentAmountCents > 0) {
+      form.setValue('paymentStatus', 'partial');
+    } else {
+      form.setValue('paymentStatus', 'pending');
+    }
+  }, [form.watch('paymentAmount'), total, form]);
 
   const addNewLineItem = () => {
     const newItem: InvoiceLineItem = {
@@ -338,6 +352,17 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
         return;
       }
 
+      // Convert paymentAmount to cents (multiply by 100)
+      const paymentAmountCents = (data.paymentAmount || 0) * 100;
+      
+      // Determine payment status based on payment amount
+      let paymentStatus: 'pending' | 'partial' | 'paid' | 'overpaid' = 'pending';
+      if (paymentAmountCents >= total) {
+        paymentStatus = paymentAmountCents > total ? 'overpaid' : 'paid';
+      } else if (paymentAmountCents > 0) {
+        paymentStatus = 'partial';
+      }
+
       // Create invoice using Convex mutation
       const invoiceId = await createInvoiceMutation({
         type: 'sale',
@@ -348,6 +373,9 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
         discountCents: discountAmount,
         discountType: data.discountType,
         discountValue: data.discountValue,
+        paymentMethod: data.paymentMethod,
+        paymentAmountCents: paymentAmountCents,
+        paymentStatus: paymentStatus,
         commissionAgentId: selectedCommissionAgentId as any,
         notes: data.notes,
         terms: data.terms,
@@ -612,11 +640,11 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                             <Input
                               type="number"
                               min="0"
-                              step="0.01"
-                              placeholder="0.00"
+                              step="1"
+                              placeholder="0"
                               {...field}
-                              value={field.value ? (field.value / 100).toFixed(2) : ''}
-                              onChange={(e) => field.onChange(parseFloat(e.target.value) * 100 || 0)}
+                              value={field.value || ''}
+                              onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
                               className="pl-8"
                             />
                           </div>
@@ -956,9 +984,33 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                     </div>
                   )}
                   <Separator className="my-2" />
-                  <div className="flex justify-between font-semibold">
+                  <div className="flex justify-between font-semibold text-lg">
                     <span>Total:</span>
                     <span>{formatCurrency(total)}</span>
+                  </div>
+                  <Separator className="my-2" />
+                  <div className="flex justify-between text-blue-600">
+                    <span>Payment Amount:</span>
+                    <span className="font-semibold">{formatCurrency((form.watch('paymentAmount') || 0) * 100)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Due Amount:</span>
+                    <span className={cn(
+                      "font-semibold",
+                      (total - (form.watch('paymentAmount') || 0) * 100) > 0 ? "text-orange-600" : "text-green-600"
+                    )}>
+                      {formatCurrency(Math.max(0, total - (form.watch('paymentAmount') || 0) * 100))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm text-muted-foreground mt-1">
+                    <span>Payment Status:</span>
+                    <Badge variant={
+                      form.watch('paymentStatus') === 'paid' ? 'default' :
+                      form.watch('paymentStatus') === 'partial' ? 'secondary' :
+                      'outline'
+                    }>
+                      {form.watch('paymentStatus')}
+                    </Badge>
                   </div>
                 </div>
               </Card>

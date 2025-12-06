@@ -12,6 +12,7 @@ import { Customer } from '@/types';
 import { format } from 'date-fns';
 import { api } from '@/lib/convex';
 import { useToast } from '@/hooks/use-toast';
+import { CustomerDetailsModal } from '../shared';
 
 interface CustomerListWithAdvancedTableProps {
   userId: string;
@@ -40,7 +41,14 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
     status: c.status || 'active',
     billingAliases: c.billingAliases || [],
     addresses: c.addresses || [],
-    metadata: c.metadata || {},
+    metadata: {
+      ...(c.metadata || {}),
+      totalSalesCents: c.totalSalesCents || 0,
+      totalSalesCount: c.totalSalesCount || 0,
+      totalDueCents: c.totalDueCents || 0,
+      lastSaleDate: c.lastSaleDate,
+      nextDueDate: c.nextDueDate,
+    },
   }));
 
   const handleViewCustomer = (customer: Customer) => {
@@ -281,6 +289,90 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
       size: 120,
     },
     {
+      accessorKey: "metadata.totalSalesCents",
+      header: "Total Sales",
+      cell: ({ row }) => {
+        const totalSales = row.original.metadata?.totalSalesCents || 0;
+        const salesCount = row.original.metadata?.totalSalesCount || 0;
+        return (
+          <div className="text-right">
+            <div className="font-medium">${(totalSales / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div className="text-xs text-muted-foreground">{salesCount} sale{salesCount !== 1 ? 's' : ''}</div>
+          </div>
+        );
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "range",
+        min: 0,
+        max: 1000000,
+        placeholder: "Filter by total sales"
+      },
+      size: 140,
+    },
+    {
+      accessorKey: "metadata.totalDueCents",
+      header: "Total Due",
+      cell: ({ row }) => {
+        const totalDue = row.original.metadata?.totalDueCents || 0;
+        return (
+          <div className={totalDue > 0 ? "text-right text-orange-600 font-semibold" : "text-right text-green-600"}>
+            ${(totalDue / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+        );
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "range",
+        min: 0,
+        max: 100000,
+        placeholder: "Filter by due amount"
+      },
+      size: 120,
+    },
+    {
+      accessorKey: "metadata.nextDueDate",
+      header: "Next Due Date",
+      cell: ({ row }) => {
+        const nextDueDate = row.original.metadata?.nextDueDate;
+        if (!nextDueDate) return <span className="text-muted-foreground">No due</span>;
+        
+        const dueDate = new Date(nextDueDate);
+        const isOverdue = dueDate < new Date();
+        
+        return (
+          <div className={isOverdue ? "text-red-600 font-medium" : ""}>
+            {format(dueDate, "MMM dd, yyyy")}
+            {isOverdue && <Badge variant="destructive" className="ml-2 text-xs">Overdue</Badge>}
+          </div>
+        );
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "date",
+        placeholder: "Filter by due date"
+      },
+      size: 150,
+    },
+    {
+      accessorKey: "metadata.lastSaleDate",
+      header: "Last Sale",
+      cell: ({ row }) => {
+        const lastSaleDate = row.original.metadata?.lastSaleDate;
+        return lastSaleDate ? format(new Date(lastSaleDate), "MMM dd, yyyy") : 'Never';
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterConfig: {
+        type: "date",
+        placeholder: "Filter by last sale"
+      },
+      size: 120,
+    },
+    {
       id: "actions",
       header: "Actions",
       cell: ({ row }) => {
@@ -398,76 +490,11 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
 
       {/* Customer Details Modal */}
       {selectedCustomer && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">{selectedCustomer.name}</h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSelectedCustomer(null)}
-              >
-                ×
-              </Button>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-semibold mb-2">Contact Information</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><strong>Email:</strong> {selectedCustomer.email}</div>
-                    <div><strong>Phone:</strong> {selectedCustomer.phone}</div>
-                    <div><strong>Type:</strong> {getTypeBadge(selectedCustomer.type)}</div>
-                    <div><strong>Status:</strong> {getStatusBadge(selectedCustomer.status)}</div>
-                  </div>
-                </div>
-                
-                <div>
-                  <h3 className="font-semibold mb-2">Billing Information</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><strong>Credit Limit:</strong> ${selectedCustomer.metadata?.creditLimit?.toLocaleString()}</div>
-                    <div><strong>Payment Terms:</strong> {selectedCustomer.metadata?.paymentTerms}</div>
-                    <div><strong>Registration Date:</strong> {selectedCustomer.metadata?.registrationDate}</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-semibold mb-2">Address</h3>
-                  {selectedCustomer.addresses?.[0] && (
-                    <div className="text-sm">
-                      <div>{selectedCustomer.addresses[0].street}</div>
-                      <div>{selectedCustomer.addresses[0].city}, {selectedCustomer.addresses[0].state} {selectedCustomer.addresses[0].zipCode}</div>
-                      <div>{selectedCustomer.addresses[0].country}</div>
-                    </div>
-                  )}
-                </div>
-                
-                <div>
-                  <h3 className="font-semibold mb-2">Billing Aliases</h3>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedCustomer.billingAliases?.map((alias, index) => (
-                      <Badge key={index} variant="outline" className="text-xs">
-                        {alias}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex justify-end gap-2 mt-6">
-              <Button variant="outline" onClick={() => setSelectedCustomer(null)}>
-                Close
-              </Button>
-              <Button onClick={() => handleEditCustomer(selectedCustomer)}>
-                Edit Customer
-              </Button>
-            </div>
-          </div>
-        </div>
+            <CustomerDetailsModal
+            customerId={selectedCustomer.id || null}
+            open={true}
+            onOpenChange={() => setSelectedCustomer(null)}
+          />
       )}
 
       <AddCustomerDialog 

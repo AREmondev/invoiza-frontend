@@ -488,6 +488,12 @@ export default defineSchema({
       )
     ),
     metadata: v.optional(v.any()),
+    // Sales tracking fields (optional for backward compatibility)
+    totalSalesCents: v.optional(v.number()), // Total sales amount in cents
+    totalSalesCount: v.optional(v.number()), // Total number of sales/invoices
+    totalDueCents: v.optional(v.number()), // Total due amount in cents
+    lastSaleDate: v.optional(v.number()), // Timestamp of last sale
+    nextDueDate: v.optional(v.number()), // Timestamp of next due date (earliest unpaid invoice due date)
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -497,7 +503,8 @@ export default defineSchema({
     .index("by_organization", ["organizationId"])
     .index("by_organization_name", ["organizationId", "name"])
     .index("by_organization_email", ["organizationId", "email"])
-    .index("by_organization_phone", ["organizationId", "phone"]),
+    .index("by_organization_phone", ["organizationId", "phone"])
+    .index("by_organization_due", ["organizationId", "totalDueCents"]),
 
   // Invoices table (for sales and purchases)
   invoices: defineTable({

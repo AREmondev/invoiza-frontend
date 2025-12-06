@@ -452,6 +452,7 @@ export function AdvancedDataTable<TData, TValue>({
   const [grouping, setGrouping] = React.useState<string[]>([]);
   const [expanded, setExpanded] = React.useState({});
   const [showFilters, setShowFilters] = React.useState(false);
+  const [isInitialLoad, setIsInitialLoad] = React.useState(true);
 
   // Load preferences from localStorage
   React.useEffect(() => {
@@ -477,10 +478,14 @@ export function AdvancedDataTable<TData, TValue>({
         console.warn("Failed to load table preferences:", error);
       }
     }
+    // Mark initial load as complete after a short delay to allow state to settle
+    setTimeout(() => setIsInitialLoad(false), 100);
   }, [tableId, userId, enableGrouping]);
 
-  // Save preferences to localStorage
+  // Save preferences to localStorage (skip during initial load)
   React.useEffect(() => {
+    if (isInitialLoad) return;
+    
     const storageKey = `table-preferences-${userId}-${tableId}`;
     const preferences = {
       columnVisibility,
@@ -490,15 +495,7 @@ export function AdvancedDataTable<TData, TValue>({
       timestamp: new Date().toISOString(),
     };
     localStorage.setItem(storageKey, JSON.stringify(preferences));
-  }, [columnVisibility, sorting, columnFilters, grouping, tableId, userId]);
-
-  // Handle selection change
-  React.useEffect(() => {
-    if (onSelectionChange) {
-      const selectedRows = table.getSelectedRowModel().rows.map(row => row.original);
-      onSelectionChange(selectedRows);
-    }
-  }, [rowSelection, onSelectionChange]);
+  }, [columnVisibility, sorting, columnFilters, grouping, tableId, userId, isInitialLoad]);
 
   const table = useReactTable({
     data,
@@ -532,6 +529,14 @@ export function AdvancedDataTable<TData, TValue>({
       globalFilter,
     },
   });
+
+  // Handle selection change
+  React.useEffect(() => {
+    if (onSelectionChange && enableRowSelection) {
+      const selectedRows = table.getSelectedRowModel().rows.map(row => row.original);
+      onSelectionChange(selectedRows);
+    }
+  }, [rowSelection, onSelectionChange, enableRowSelection, table]);
 
   const clearAllFilters = () => {
     setGlobalFilter("");

@@ -125,6 +125,7 @@ export function UnifiedDataTable<TData, TValue>({
   const [globalFilter, setGlobalFilter] = React.useState("");
   const [columnSearch, setColumnSearch] = React.useState<Record<string, string>>({});
   const [showColumnFilters, setShowColumnFilters] = React.useState(false);
+  const [isInitialLoad, setIsInitialLoad] = React.useState(true);
 
   // Load preferences from localStorage
   React.useEffect(() => {
@@ -148,6 +149,8 @@ export function UnifiedDataTable<TData, TValue>({
         console.warn("Failed to load table preferences:", error);
       }
     }
+    // Mark initial load as complete after a short delay to allow state to settle
+    setTimeout(() => setIsInitialLoad(false), 100);
   }, [tableId, userId]);
 
   const table = useReactTable({
@@ -176,8 +179,10 @@ export function UnifiedDataTable<TData, TValue>({
     },
   });
 
-  // Save preferences to localStorage
+  // Save preferences to localStorage (skip during initial load)
   React.useEffect(() => {
+    if (isInitialLoad) return;
+    
     const storageKey = `unified-table-prefs-${userId}-${tableId}`;
     const preferences = {
       columnVisibility,
@@ -187,7 +192,7 @@ export function UnifiedDataTable<TData, TValue>({
       timestamp: new Date().toISOString(),
     };
     localStorage.setItem(storageKey, JSON.stringify(preferences));
-  }, [columnVisibility, sorting, columnFilters, tableId, userId, table]);
+  }, [columnVisibility, sorting, columnFilters, tableId, userId, table, isInitialLoad]);
 
   const handleColumnSearch = (columnId: string, value: string) => {
     setColumnSearch((prev) => ({ ...prev, [columnId]: value }));
