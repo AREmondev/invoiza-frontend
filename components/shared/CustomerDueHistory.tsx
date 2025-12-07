@@ -45,10 +45,28 @@ export function CustomerDueHistory({
   
   // Use customer totals if available, otherwise calculate from invoices
   const totalSalesCents = customer?.totalSalesCents ?? invoices.reduce((sum, inv) => sum + inv.totalCents, 0);
+  
+  // Calculate total paid from actual payment records, not just invoice.paidCents
+  const totalPaidCents = invoices.reduce((sum, inv) => {
+    if (inv.payments && inv.payments.length > 0) {
+      // Sum all individual payments
+      return sum + inv.payments.reduce((paymentSum, p) => paymentSum + p.amountCents, 0);
+    } else {
+      // Fallback to invoice.paidCents if no payment records
+      return sum + (inv.paidCents || 0);
+    }
+  }, 0);
+  
+  // Calculate total due - invoices that are pending or partial
   const totalDueCents = customer?.totalDueCents ?? invoices
     .filter(inv => inv.paymentStatus === 'pending' || inv.paymentStatus === 'partial')
-    .reduce((sum, inv) => sum + inv.dueCents, 0);
-  const totalPaidCents = invoices.reduce((sum, inv) => sum + inv.paidCents, 0);
+    .reduce((sum, inv) => {
+      // Calculate due from actual payments
+      const paidFromPayments = inv.payments?.reduce((s, p) => s + p.amountCents, 0) || 0;
+      const calculatedPaid = Math.max(inv.paidCents || 0, paidFromPayments);
+      return sum + Math.max(0, inv.totalCents - calculatedPaid);
+    }, 0);
+  
   const totalInvoicedCents = totalSalesCents;
   const totalSalesCount = customer?.totalSalesCount ?? invoices.length;
 
@@ -70,10 +88,25 @@ export function CustomerDueHistory({
         invoice,
       });
 
-      // Add payment transaction if invoice has paid amount
-      if (invoice.paidCents > 0) {
+      // Add payments from payments array if exists (individual payment records)
+      if (invoice.payments && invoice.payments.length > 0) {
+        invoice.payments.forEach((payment) => {
+          transactionList.push({
+            id: payment.id,
+            type: 'payment',
+            date: payment.paymentDate,
+            amount: payment.amountCents,
+            status: payment.status,
+            reference: payment.reference || `Payment for ${invoice.invoiceNumber}`,
+            description: `Payment via ${payment.paymentMethod}`,
+            payment,
+          });
+        });
+      } else if (invoice.paidCents > 0) {
+        // Fallback: If no payment records exist but paidCents > 0, show aggregate payment
+        // This handles legacy data or cases where payment wasn't recorded properly
         transactionList.push({
-          id: `${invoice.id}-payment`,
+          id: `${invoice.id}-payment-aggregate`,
           type: 'payment',
           date: invoice.invoiceDate, // Use invoice date as payment date
           amount: invoice.paidCents,
@@ -83,20 +116,6 @@ export function CustomerDueHistory({
           invoice,
         });
       }
-
-      // Add payments from payments array if exists
-      invoice.payments?.forEach((payment) => {
-        transactionList.push({
-          id: payment.id,
-          type: 'payment',
-          date: payment.paymentDate,
-          amount: payment.amountCents,
-          status: payment.status,
-          reference: payment.reference || `Payment for ${invoice.invoiceNumber}`,
-          description: `Payment via ${payment.paymentMethod}`,
-          payment,
-        });
-      });
     });
 
     // Sort transactions by date (newest first)
@@ -106,12 +125,12 @@ export function CustomerDueHistory({
   }, [invoices, payments]);
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
+      currency: 'BDT',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(amount / 100);
+    }).format(amount / 100).replace(/BDT/g, '৳').trim();
   };
 
   const formatDate = (date: Date) => {

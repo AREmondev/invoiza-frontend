@@ -129,7 +129,35 @@ export const getCustomerSalesHistory = query({
       .collect();
 
     const limit = args.limit || 50;
-    return invoices.slice(0, limit);
+    const limitedInvoices = invoices.slice(0, limit);
+
+    // Get payments for these invoices
+    const invoiceIds = limitedInvoices.map((inv) => inv._id);
+    const payments = await Promise.all(
+      invoiceIds.map(async (invoiceId) => {
+        return await ctx.db
+          .query("payments")
+          .withIndex("by_invoice", (q) => q.eq("invoiceId", invoiceId))
+          .collect();
+      })
+    );
+
+    // Flatten payments array
+    const allPayments = payments.flat();
+
+    // Attach payments to invoices
+    const invoicesWithPayments = limitedInvoices.map((invoice) => {
+      const invoicePayments = allPayments.filter(
+        (p) => p.invoiceId === invoice._id
+      );
+      
+      return {
+        ...invoice,
+        payments: invoicePayments,
+      };
+    });
+
+    return invoicesWithPayments;
   },
 });
 
