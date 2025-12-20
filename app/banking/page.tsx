@@ -1,29 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useQuery } from "convex/react";
+import { useSession } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BankList } from "@/components/banking/BankList";
 import { BankListAdvanced } from "@/components/banking/bank-list-advanced";
 import { CashTransactions } from "@/components/banking/CashTransactions";
-import { Button } from "@/components/ui/button";
-import { Settings } from "lucide-react";
+import { api } from "@/lib/convex";
+import { formatCurrency } from "@/lib/currency";
 
 export default function BankingPage() {
-  const [useAdvancedTable, setUseAdvancedTable] = useState(true);
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+
+  // Fetch bank payment methods
+  const bankMethods = useQuery(
+    api.queries.paymentMethods.getPaymentMethodsByType,
+    userEmail ? { userEmail, type: "bank" } : "skip"
+  ) || [];
+
+  // Fetch cash payment methods
+  const cashMethods = useQuery(
+    api.queries.paymentMethods.getPaymentMethodsByType,
+    userEmail ? { userEmail, type: "cash" } : "skip"
+  ) || [];
+
+  // Calculate total bank balance
+  const totalBankBalance = bankMethods.reduce(
+    (sum: number, method: any) => sum + (method.balanceCents || 0),
+    0
+  );
+
+  // Calculate total cash balance
+  const totalCashBalance = cashMethods.reduce(
+    (sum: number, method: any) => sum + (method.balanceCents || 0),
+    0
+  );
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
+      <div className="mb-6">
         <h1 className="text-3xl font-bold">Banking & Cash</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setUseAdvancedTable(!useAdvancedTable)}
-        >
-          <Settings className="h-4 w-4 mr-2" />
-          {useAdvancedTable ? "Use Basic Table" : "Use Advanced Table"}
-        </Button>
+        <p className="text-muted-foreground">
+          Manage bank accounts and cash transactions
+        </p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
@@ -34,7 +54,10 @@ export default function BankingPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$12,345.67</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalBankBalance)}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {bankMethods.length} bank account{bankMethods.length !== 1 ? 's' : ''}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -42,7 +65,23 @@ export default function BankingPage() {
             <CardTitle className="text-sm font-medium">Cash in Hand</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$1,234.56</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalCashBalance)}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {cashMethods.length} cash register{cashMethods.length !== 1 ? 's' : ''}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Balance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCurrency(totalBankBalance + totalCashBalance)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Combined balance
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -53,11 +92,7 @@ export default function BankingPage() {
           <TabsTrigger value="cash">Cash Transactions</TabsTrigger>
         </TabsList>
         <TabsContent value="bank">
-          {useAdvancedTable ? (
-            <BankListAdvanced userId="current-user" />
-          ) : (
-            <BankList />
-          )}
+          <BankListAdvanced userId={userEmail || "default"} />
         </TabsContent>
         <TabsContent value="cash">
           <CashTransactions />

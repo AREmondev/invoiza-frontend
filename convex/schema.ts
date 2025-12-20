@@ -602,5 +602,73 @@ export default defineSchema({
     .index("by_invoice_number", ["invoiceNumber"])
     .index("by_status", ["status"])
     .index("by_date", ["invoiceDate"]),
+
+  // Payments table (for tracking payments separately)
+  payments: defineTable({
+    organizationId: v.id("organizations"),
+    invoiceId: v.id("invoices"),
+    customerId: v.optional(v.id("customers")),
+    amountCents: v.number(),
+    paymentMethod: v.string(),
+    reference: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    paymentDate: v.number(), // Timestamp
+    status: v.union(
+      v.literal("pending"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("refunded")
+    ),
+    processedBy: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.id("users"),
+    updatedBy: v.id("users"),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_invoice", ["invoiceId"])
+    .index("by_customer", ["customerId"])
+    .index("by_date", ["paymentDate"])
+    .index("by_status", ["status"]),
+
+  // Payment Methods table (for managing payment methods)
+  paymentMethods: defineTable({
+    organizationId: v.id("organizations"),
+    name: v.string(), // e.g., "Cash", "Credit Card", "Bank Transfer"
+    code: v.string(), // Unique code identifier (e.g., "cash", "credit_card")
+    type: v.union(
+      v.literal("cash"),
+      v.literal("bank"),
+      v.literal("e_wallet"),
+      v.literal("card"),
+      v.literal("check"),
+      v.literal("other")
+    ),
+    description: v.optional(v.string()),
+    // Bank-specific fields
+    bankName: v.optional(v.string()),
+    accountNumber: v.optional(v.string()),
+    accountHolderName: v.optional(v.string()),
+    branchName: v.optional(v.string()),
+    // E-wallet specific fields
+    eWalletType: v.optional(v.string()), // e.g., "bKash", "Nagad", "Rocket", "PayPal"
+    eWalletNumber: v.optional(v.string()),
+    // Card specific fields
+    cardType: v.optional(v.string()), // e.g., "Credit", "Debit"
+    cardLastFour: v.optional(v.string()),
+    // Balance tracking (for bank and cash)
+    balanceCents: v.optional(v.number()), // Current balance in cents
+    initialBalanceCents: v.optional(v.number()), // Initial balance when created
+    isActive: v.boolean(),
+    sortOrder: v.number(), // For ordering in UI
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.id("users"),
+    updatedBy: v.id("users"),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_organization_code", ["organizationId", "code"])
+    .index("by_organization_active", ["organizationId", "isActive"])
+    .index("by_organization_type", ["organizationId", "type"]),
 });
 

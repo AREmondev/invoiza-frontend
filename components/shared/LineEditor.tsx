@@ -87,12 +87,12 @@ export function LineEditor({
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
+      currency: 'BDT',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(amount / 100);
+    }).format(amount / 100).replace(/BDT/g, '৳').trim();
   };
 
   // Calculate total for this line

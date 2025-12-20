@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { DollarSign, CreditCard, Building2, Wallet, CheckCircle, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,13 +13,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Payment, PaymentStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-
-interface PaymentMethod {
-  id: string;
-  name: string;
-  icon: React.ReactNode;
-  enabled: boolean;
-}
+import { useQuery } from 'convex/react';
+import { useSession } from 'next-auth/react';
+import { api } from '@/lib/convex';
 
 interface PaymentModuleProps {
   invoiceId?: string;
@@ -32,14 +28,29 @@ interface PaymentModuleProps {
   className?: string;
 }
 
-const paymentMethods: PaymentMethod[] = [
-  { id: 'cash', name: 'Cash', icon: <Wallet className="h-4 w-4" />, enabled: true },
-  { id: 'credit_card', name: 'Credit Card', icon: <CreditCard className="h-4 w-4" />, enabled: true },
-  { id: 'debit_card', name: 'Debit Card', icon: <CreditCard className="h-4 w-4" />, enabled: true },
-  { id: 'bank_transfer', name: 'Bank Transfer', icon: <Building2 className="h-4 w-4" />, enabled: true },
-  { id: 'check', name: 'Check', icon: <DollarSign className="h-4 w-4" />, enabled: true },
-  { id: 'mobile_payment', name: 'Mobile Payment', icon: <Wallet className="h-4 w-4" />, enabled: true },
-  { id: 'other', name: 'Other', icon: <DollarSign className="h-4 w-4" />, enabled: true },
+// Helper function to get icon component based on payment method type
+const getIconComponent = (type?: string) => {
+  switch (type) {
+    case 'cash':
+      return Wallet;
+    case 'bank':
+      return Building2;
+    case 'e_wallet':
+      return Wallet;
+    case 'card':
+      return CreditCard;
+    case 'check':
+      return DollarSign;
+    default:
+      return DollarSign;
+  }
+};
+
+// Fallback payment methods if none exist in database
+const fallbackPaymentMethods = [
+  { code: 'cash', name: 'Cash', type: 'cash' },
+  { code: 'bank_transfer', name: 'Bank Transfer', type: 'bank' },
+  { code: 'other', name: 'Other', type: 'other' },
 ];
 
 export function PaymentModule({
@@ -52,18 +63,49 @@ export function PaymentModule({
   existingPayments = [],
   className,
 }: PaymentModuleProps) {
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+  
+  // Fetch payment methods from database
+  const dbPaymentMethods = useQuery(
+    api.queries.paymentMethods.getPaymentMethods,
+    userEmail ? { userEmail } : "skip"
+  ) || [];
+
+  // Use database methods or fallback
+  const paymentMethods = useMemo(() => {
+    if (dbPaymentMethods.length > 0) {
+      return dbPaymentMethods.map((method: any) => ({
+        code: method.code,
+        name: method.name,
+        type: method.type || 'other',
+        isActive: method.isActive,
+      }));
+    }
+    return fallbackPaymentMethods.map(m => ({ ...m, isActive: true }));
+  }, [dbPaymentMethods]);
+
   const [showAddPayment, setShowAddPayment] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<string>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<string>(
+    paymentMethods.length > 0 ? paymentMethods[0].code : 'cash'
+  );
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentReference, setPaymentReference] = useState<string>('');
   const [paymentNotes, setPaymentNotes] = useState<string>('');
   const [paymentDate, setPaymentDate] = useState<Date>(new Date());
 
+  // Update default payment method when methods load
+  useEffect(() => {
+    if (paymentMethods.length > 0 && !paymentMethods.find(m => m.code === paymentMethod)) {
+      setPaymentMethod(paymentMethods[0].code);
+    }
+  }, [paymentMethods, paymentMethod]);
+
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
-    }).format(amount / 100);
+      currency: 'BDT',
+    }).format(amount / 100).replace(/BDT/g, '৳').trim();
   };
 
   const handleAddPayment = () => {
@@ -106,14 +148,15 @@ export function PaymentModule({
     }
   };
 
-  const getPaymentMethodIcon = (methodId: string) => {
-    const method = paymentMethods.find(m => m.id === methodId);
-    return method?.icon || <DollarSign className="h-4 w-4" />;
+  const getPaymentMethodIcon = (methodCode: string) => {
+    const method = paymentMethods.find(m => m.code === methodCode);
+    const IconComponent = getIconComponent(method?.type);
+    return <IconComponent className="h-4 w-4" />;
   };
 
-  const getPaymentMethodName = (methodId: string) => {
-    const method = paymentMethods.find(m => m.id === methodId);
-    return method?.name || methodId;
+  const getPaymentMethodName = (methodCode: string) => {
+    const method = paymentMethods.find(m => m.code === methodCode);
+    return method?.name || methodCode;
   };
 
   const totalPayments = existingPayments.reduce((sum, payment) => sum + payment.amountCents, 0);
@@ -167,22 +210,25 @@ export function PaymentModule({
         <div className="space-y-2">
           <Label>Quick Add Payment</Label>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {paymentMethods.filter(m => m.enabled).map((method) => (
-              <Button
-                key={method.id}
-                variant="outline"
-                className="flex items-center gap-2"
-                onClick={() => {
-                  setPaymentMethod(method.id);
-                  setPaymentAmount(Math.min(remainingDue, remainingDue));
-                  setShowAddPayment(true);
-                }}
-                disabled={remainingDue <= 0}
-              >
-                {method.icon}
-                {method.name}
-              </Button>
-            ))}
+            {paymentMethods.filter(m => m.isActive).map((method) => {
+              const IconComponent = getIconComponent(method.type);
+              return (
+                <Button
+                  key={method.code}
+                  variant="outline"
+                  className="flex items-center gap-2"
+                  onClick={() => {
+                    setPaymentMethod(method.code);
+                    setPaymentAmount(Math.min(remainingDue, remainingDue));
+                    setShowAddPayment(true);
+                  }}
+                  disabled={remainingDue <= 0}
+                >
+                  <IconComponent className="h-4 w-4" />
+                  {method.name}
+                </Button>
+              );
+            })}
           </div>
         </div>
 
@@ -270,14 +316,17 @@ export function PaymentModule({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {paymentMethods.filter(m => m.enabled).map((method) => (
-                    <SelectItem key={method.id} value={method.id}>
-                      <div className="flex items-center gap-2">
-                        {method.icon}
-                        {method.name}
-                      </div>
-                    </SelectItem>
-                  ))}
+                  {paymentMethods.filter(m => m.isActive).map((method) => {
+                    const IconComponent = getIconComponent(method.type);
+                    return (
+                      <SelectItem key={method.code} value={method.code}>
+                        <div className="flex items-center gap-2">
+                          <IconComponent className="h-4 w-4" />
+                          {method.name}
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

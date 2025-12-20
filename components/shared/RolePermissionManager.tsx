@@ -22,6 +22,7 @@ import { PermissionGuard } from "@/components/rbac/PermissionGuard";
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DialogDescription } from "@radix-ui/react-dialog";
+import { MODULES, ACTIONS, PERMISSION_SCOPES } from "@/convex/lib/permissions";
 
 interface RolePermissionManagerProps {
   compact?: boolean;
@@ -62,6 +63,7 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
   const deleteRole = useMutation(api.mutations.roles.deleteRole);
   const assignPermission = useMutation(api.mutations.permissions.assignPermissionToRole);
   const revokePermission = useMutation(api.mutations.permissions.revokePermissionFromRole);
+  const createCustomPermission = useMutation(api.mutations.permissions.createCustomPermission);
   const createUser = useMutation(api.mutations.users.createUser);
   const updateUser = useMutation(api.mutations.users.updateUser);
   const deleteUser = useMutation(api.mutations.users.deleteUser);
@@ -601,6 +603,16 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
 
         {/* Permissions Tab */}
         <TabsContent value="permissions" className="space-y-4">
+          <div className="flex justify-end">
+            {(isSuperAdmin || hasPermission("permissions", "create")) && (
+              <Button
+                onClick={() => setShowPermissionDialog(true)}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Create Permission
+              </Button>
+            )}
+          </div>
           {permissions && permissions.length > 0 && (
             <Card>
               <CardHeader>
@@ -746,6 +758,46 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
         </Dialog>
       )}
 
+      {/* Create Permission Dialog */}
+      <Dialog open={showPermissionDialog} onOpenChange={setShowPermissionDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create New Permission</DialogTitle>
+            <DialogDescription>
+              Create a custom permission for your application modules.
+            </DialogDescription>
+          </DialogHeader>
+          <PermissionForm
+            onSave={async (data) => {
+              try {
+                await createCustomPermission({
+                  module: data.module,
+                  action: data.action as "view" | "create" | "edit" | "delete" | "export" | "approve" | "custom",
+                  customAction: data.customAction,
+                  displayName: data.displayName,
+                  description: data.description,
+                  category: data.category,
+                  scope: data.scope as "global" | "own" | "team" | "department",
+                  userEmail: userEmail || undefined,
+                });
+                toast({
+                  title: "Success",
+                  description: "Permission created successfully",
+                });
+                setShowPermissionDialog(false);
+              } catch (error: any) {
+                toast({
+                  title: "Error",
+                  description: error.message || "Failed to create permission",
+                  variant: "destructive",
+                });
+              }
+            }}
+            onCancel={() => setShowPermissionDialog(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
@@ -773,6 +825,187 @@ export function RolePermissionManager({ compact = false }: RolePermissionManager
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+interface PermissionFormProps {
+  onSave: (data: {
+    module: string;
+    action: string;
+    customAction?: string;
+    displayName: string;
+    description?: string;
+    category?: string;
+    scope: string;
+  }) => void;
+  onCancel: () => void;
+}
+
+function PermissionForm({ onSave, onCancel }: PermissionFormProps) {
+  const [formData, setFormData] = useState({
+    module: "",
+    action: "",
+    customAction: "",
+    displayName: "",
+    description: "",
+    category: "",
+    scope: "global",
+  });
+
+  const moduleOptions = Object.values(MODULES).map((value) => ({
+    value,
+    label: value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " "),
+  }));
+
+  const actionOptions = Object.values(ACTIONS).map((value) => ({
+    value,
+    label: value.charAt(0).toUpperCase() + value.slice(1),
+  }));
+
+  const scopeOptions = Object.values(PERMISSION_SCOPES).map((value) => ({
+    value,
+    label: value.charAt(0).toUpperCase() + value.slice(1),
+  }));
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.module || !formData.action || !formData.displayName) {
+      return;
+    }
+    if (formData.action === "custom" && !formData.customAction) {
+      return;
+    }
+    onSave({
+      module: formData.module,
+      action: formData.action,
+      customAction: formData.action === "custom" ? formData.customAction : undefined,
+      displayName: formData.displayName,
+      description: formData.description || undefined,
+      category: formData.category || undefined,
+      scope: formData.scope,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="module">Module *</Label>
+        <Select
+          value={formData.module}
+          onValueChange={(value) => setFormData({ ...formData, module: value })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select a module" />
+          </SelectTrigger>
+          <SelectContent>
+            {moduleOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="action">Action *</Label>
+        <Select
+          value={formData.action}
+          onValueChange={(value) => setFormData({ ...formData, action: value, customAction: "" })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select an action" />
+          </SelectTrigger>
+          <SelectContent>
+            {actionOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {formData.action === "custom" && (
+        <div className="space-y-2">
+          <Label htmlFor="customAction">Custom Action *</Label>
+          <Input
+            id="customAction"
+            value={formData.customAction}
+            onChange={(e) => setFormData({ ...formData, customAction: e.target.value })}
+            placeholder="e.g., refund, cancel, archive"
+          />
+          <p className="text-xs text-muted-foreground">
+            Enter a custom action name (lowercase, no spaces)
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="displayName">Display Name *</Label>
+        <Input
+          id="displayName"
+          value={formData.displayName}
+          onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+          placeholder="e.g., View Sales, Create Products"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="description">Description</Label>
+        <Textarea
+          id="description"
+          value={formData.description}
+          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          placeholder="Describe what this permission allows"
+          rows={3}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="category">Category</Label>
+        <Input
+          id="category"
+          value={formData.category}
+          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+          placeholder="e.g., Sales, Products, Customers"
+        />
+        <p className="text-xs text-muted-foreground">
+          Optional: Group permissions by category
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="scope">Scope *</Label>
+        <Select
+          value={formData.scope}
+          onValueChange={(value) => setFormData({ ...formData, scope: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {scopeOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Global: Organization-wide access | Own: Own records only | Team: Team records | Department: Department records
+        </p>
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={!formData.module || !formData.action || !formData.displayName || (formData.action === "custom" && !formData.customAction)}>
+          Create Permission
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 

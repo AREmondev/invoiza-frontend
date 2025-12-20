@@ -42,11 +42,11 @@ export function ProductDetailsPanel({
   // Get base unit
   const baseUnit = product.units.find(u => u.isBaseUnit || u.unit === product.baseUnit) || product.units[0];
 
-  const formatPrice = (price: number, currency = 'USD') => {
-    return new Intl.NumberFormat('en-US', {
+  const formatPrice = (price: number, currency = 'BDT') => {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
       currency,
-    }).format(price / 100); // Convert cents to dollars
+    }).format(price / 100).replace(/BDT/g, '৳').trim(); // Convert cents to taka
   };
 
   const getStockStatus = () => {

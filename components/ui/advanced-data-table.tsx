@@ -479,7 +479,12 @@ export function AdvancedDataTable<TData, TValue>({
       }
     }
     // Mark initial load as complete after a short delay to allow state to settle
-    setTimeout(() => setIsInitialLoad(false), 100);
+    const timeoutId = setTimeout(() => setIsInitialLoad(false), 100);
+    
+    // Cleanup: cancel timeout if component unmounts
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [tableId, userId, enableGrouping]);
 
   // Save preferences to localStorage (skip during initial load)

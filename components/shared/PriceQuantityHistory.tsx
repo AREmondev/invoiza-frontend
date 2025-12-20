@@ -55,10 +55,10 @@ export function PriceQuantityHistory({
   }));
   
   const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
-    }).format(price / 100);
+      currency: 'BDT',
+    }).format(price / 100).replace(/BDT/g, '৳').trim();
   };
 
   const formatDate = (date: Date) => {

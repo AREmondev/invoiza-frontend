@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Save, Eye, Trash2, Calculator, DollarSign, User, Calendar, Package, AlertCircle, ShoppingCart } from 'lucide-react';
+import { Plus, Save, Eye, Trash2, Calculator, DollarSign, User, Calendar, Package, AlertCircle, ShoppingCart, CreditCard, Building2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -91,6 +91,48 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
     api.queries.customers.getCustomers,
     userEmail ? { userEmail } : "skip"
   ) || [];
+
+  // Load payment methods from Convex
+  const dbPaymentMethods = useQuery(
+    api.queries.paymentMethods.getPaymentMethods,
+    userEmail ? { userEmail } : "skip"
+  ) || [];
+
+  // Transform payment methods for display
+  const paymentMethods = useMemo(() => {
+    if (dbPaymentMethods.length > 0) {
+      return dbPaymentMethods
+        .filter((m: any) => m.isActive)
+        .map((method: any) => ({
+          code: method.code,
+          name: method.name,
+          type: method.type || 'other',
+        }));
+    }
+    // Fallback if no payment methods exist
+    return [
+      { code: 'cash', name: 'Cash', type: 'cash' },
+      { code: 'bank_transfer', name: 'Bank Transfer', type: 'bank' },
+    ];
+  }, [dbPaymentMethods]);
+
+  // Helper function to get icon component based on payment method type
+  const getPaymentMethodIcon = (type?: string) => {
+    switch (type) {
+      case 'cash':
+        return Wallet;
+      case 'bank':
+        return Building2;
+      case 'e_wallet':
+        return Wallet;
+      case 'card':
+        return CreditCard;
+      case 'check':
+        return DollarSign;
+      default:
+        return DollarSign;
+    }
+  };
 
   // Convert Convex customers to Customer type - memoized to prevent re-renders
   const customers: Customer[] = useMemo(() => {
@@ -191,7 +233,7 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
       customerId: '',
       billingName: '',
       invoiceDate: new Date(),
-      paymentMethod: preferences?.lastUsedPaymentMethod || 'cash',
+      paymentMethod: paymentMethods.length > 0 ? paymentMethods[0].code : 'cash',
       paymentAmount: 0, // Whole number, will be converted to cents when saving
       paymentStatus: 'pending',
       discountType: 'percentage',
@@ -423,10 +465,10 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
-    }).format(amount / 100);
+      currency: 'BDT',
+    }).format(amount / 100).replace(/BDT/g, '৳').trim();
   };
 
   // {customers.map((customer) => (
@@ -612,14 +654,21 @@ export function EnhancedSaleForm({ tabId, initialCustomerName = '' }: EnhancedSa
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue />
+                              <SelectValue placeholder="Select payment method" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="cash">Cash</SelectItem>
-                            <SelectItem value="credit_card">Credit Card</SelectItem>
-                            <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                            <SelectItem value="check">Check</SelectItem>
+                            {paymentMethods.map((method) => {
+                              const IconComponent = getPaymentMethodIcon(method.type);
+                              return (
+                                <SelectItem key={method.code} value={method.code}>
+                                  <div className="flex items-center gap-2">
+                                    <IconComponent className="h-4 w-4" />
+                                    <span>{method.name}</span>
+                                  </div>
+                                </SelectItem>
+                              );
+                            })}
                           </SelectContent>
                         </Select>
                         <FormMessage />

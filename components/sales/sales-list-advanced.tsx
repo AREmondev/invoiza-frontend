@@ -38,17 +38,24 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
   const userEmail = session?.user?.email;
   const { toast } = useToast();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [saleToDelete, setSaleToDelete] = useState<{ id: string; invoiceNumber: string; _id: string } | null>(null);
+  const [saleToDelete, setSaleToDelete] = useState<{
+    id: string;
+    invoiceNumber: string;
+    _id: string;
+  } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch sales invoices from Convex
-  const invoices = useQuery(
-    api.queries.invoices.getInvoices,
-    userEmail ? { userEmail, type: "sale" } : "skip"
-  ) || [];
+  const invoices =
+    useQuery(
+      api.queries.invoices.getInvoices,
+      userEmail ? { userEmail, type: "sale" } : "skip"
+    ) || [];
 
   // Delete mutation
-  const deleteInvoiceMutation = useMutation(api.mutations.invoices.deleteInvoice);
+  const deleteInvoiceMutation = useMutation(
+    api.mutations.invoices.deleteInvoice
+  );
 
   // Transform invoices to match table format
   const salesData = invoices.map((invoice: any) => ({
@@ -56,38 +63,43 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
     customer: invoice.customerName || invoice.billingName || "N/A",
     date: format(new Date(invoice.invoiceDate), "yyyy-MM-dd"),
     amount: invoice.totalCents / 100,
-    paymentStatus: invoice.paymentStatus === "paid" ? "Paid" : 
-                   invoice.paymentStatus === "partial" ? "Partial" : 
-                   invoice.paymentStatus === "overpaid" ? "Overpaid" : "Due",
+    paymentStatus:
+      invoice.paymentStatus === "paid"
+        ? "Paid"
+        : invoice.paymentStatus === "partial"
+          ? "Partial"
+          : invoice.paymentStatus === "overpaid"
+            ? "Overpaid"
+            : "Due",
     paymentMethod: invoice.paymentMethod || "N/A",
     whatsapp: "", // Will be fetched from customer if needed
     _id: invoice._id, // Store Convex ID for operations
   }));
 
-  const columns: AdvancedColumnDef<typeof salesData[0], any>[] = [
+  const columns: AdvancedColumnDef<(typeof salesData)[0], any>[] = [
     {
       accessorKey: "id",
       header: "Invoice #",
       filterConfig: {
         type: "text",
-        placeholder: "Filter by invoice number"
-      }
+        placeholder: "Filter by invoice number",
+      },
     },
     {
       accessorKey: "customer",
       header: "Customer",
       filterConfig: {
         type: "text",
-        placeholder: "Filter by customer name"
-      }
+        placeholder: "Filter by customer name",
+      },
     },
     {
       accessorKey: "date",
       header: "Date",
       filterConfig: {
         type: "date",
-        placeholder: "Filter by date"
-      }
+        placeholder: "Filter by date",
+      },
     },
     {
       accessorKey: "amount",
@@ -97,8 +109,8 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
         type: "range",
         min: 0,
         max: 2000,
-        placeholder: "Filter by amount range"
-      }
+        placeholder: "Filter by amount range",
+      },
     },
     {
       accessorKey: "paymentStatus",
@@ -106,24 +118,29 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
       cell: ({ row }) => {
         const paymentStatus = row.getValue("paymentStatus") as string;
         return (
-          <Badge 
-            variant={paymentStatus === "Paid" ? "default" : 
-                    paymentStatus === "Partial" ? "secondary" : 
-                    "destructive"}
+          <Badge
+            variant={
+              paymentStatus === "Paid"
+                ? "default"
+                : paymentStatus === "Partial"
+                  ? "secondary"
+                  : "destructive"
+            }
           >
             {paymentStatus}
           </Badge>
         );
       },
+
       filterConfig: {
         type: "select",
         options: [
           { label: "Paid", value: "Paid" },
           { label: "Due", value: "Due" },
-          { label: "Partial", value: "Partial" }
+          { label: "Partial", value: "Partial" },
         ],
-        placeholder: "Filter by payment status"
-      }
+        placeholder: "Filter by payment status",
+      },
     },
     {
       accessorKey: "paymentMethod",
@@ -133,45 +150,55 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
         options: [
           { label: "Cash", value: "Cash" },
           { label: "Bank", value: "Bank" },
-          { label: "Mobile Banking", value: "Mobile Banking" }
+          { label: "Mobile Banking", value: "Mobile Banking" },
         ],
-        placeholder: "Filter by payment method"
-      }
+        placeholder: "Filter by payment method",
+      },
     },
     {
-      accessorKey: "paymentStatus",
+      id: "actions",
       header: "Actions",
       cell: ({ row }) => {
         const sale = row.original;
-        
-        return (
-          <div className="flex items-center gap-3 mt-2">
 
-          {/* Delete Button */}
-          <button
-            onClick={() => handleDelete(sale._id, sale.id)}
-            className="flex items-center gap-1 text-red-600 hover:text-red-700"
-          >
-            <Trash className="h-4 w-4" />
-            <span>Delete</span>
-          </button>
-        
-          {/* WhatsApp Button */}
-          {sale.whatsapp && (
-            <button
-              onClick={() =>
-                handleWhatsAppShare(sale.whatsapp, sale.id, sale.amount)
-              }
-              className="flex items-center gap-1 text-green-600 hover:text-green-700"
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => handleEdit(sale.id)}
+              title="Edit Sale"
             >
-              <MessageCircle className="h-4 w-4" />
-              <span>WhatsApp</span>
-            </button>
-          )}
-        
-        </div>
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+              onClick={() => handleDelete(sale._id, sale.id)}
+              title="Delete Sale"
+            >
+              <Trash className="h-4 w-4" />
+            </Button>
+            {sale.whatsapp && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-green-600 hover:text-green-700"
+                onClick={() =>
+                  handleWhatsAppShare(sale.whatsapp, sale.id, sale.amount)
+                }
+                title="Share via WhatsApp"
+              >
+                <MessageCircle className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         );
       },
+      enableSorting: false,
+      enableColumnFilter: false,
     },
   ];
 
@@ -210,7 +237,8 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
       console.error("Error deleting sale:", error);
       toast({
         title: "Error",
-        description: error.message || "Failed to delete sale. Please try again.",
+        description:
+          error.message || "Failed to delete sale. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -218,9 +246,15 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
     }
   };
 
-  const handleWhatsAppShare = (number: string, saleId: string, amount: number) => {
+  const handleWhatsAppShare = (
+    number: string,
+    saleId: string,
+    amount: number
+  ) => {
     const sale = salesData.find((s) => s.id === saleId);
-    const text = encodeURIComponent(`Invoice ${saleId} amount $${amount.toFixed(2)} is ${sale?.paymentStatus || "Paid"}. Thank you!`);
+    const text = encodeURIComponent(
+      `Invoice ${saleId} amount $${amount.toFixed(2)} is ${sale?.paymentStatus || "Paid"}. Thank you!`
+    );
     const url = `https://wa.me/${number}?text=${text}`;
     window.open(url, "_blank");
   };
@@ -251,15 +285,19 @@ export function SalesListAdvanced({ userId }: SalesListAdvancedProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Sale</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete sale <strong>{saleToDelete?.invoiceNumber}</strong>? 
-              This action cannot be undone and will permanently remove this sale from the system.
+              Are you sure you want to delete sale{" "}
+              <strong>{saleToDelete?.invoiceNumber}</strong>? This action cannot
+              be undone and will permanently remove this sale from the system.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting} onClick={() => {
-              setDeleteDialogOpen(false);
-              setSaleToDelete(null);
-            }}>
+            <AlertDialogCancel
+              disabled={isDeleting}
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setSaleToDelete(null);
+              }}
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction

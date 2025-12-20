@@ -64,20 +64,34 @@ export const createCustomPermission = mutation({
       v.literal("team"),
       v.literal("department")
     ),
+    userEmail: v.optional(v.string()), // Email of current user (from NextAuth session)
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not authenticated");
+    // Get current user - try Convex Auth first, then fallback to email lookup
+    let currentUser = null;
+    
+    try {
+      const identity = await ctx.auth.getUserIdentity();
+      if (identity?.email) {
+        currentUser = await ctx.db
+          .query("users")
+          .withIndex("by_email", (q) => q.eq("email", identity.email!))
+          .first();
+      }
+    } catch {
+      // Convex Auth not configured, use email from args
     }
 
-    const currentUser = await ctx.db
-      .query("users")
-      .withIndex("by_email", (q) => q.eq("email", identity.email!))
-      .first();
+    // Fallback: Use email from args (NextAuth session)
+    if (!currentUser && args.userEmail) {
+      currentUser = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", args.userEmail!))
+        .first();
+    }
 
     if (!currentUser) {
-      throw new Error("User not found");
+      throw new Error("Not authenticated");
     }
 
     // Only super admin can create custom permissions

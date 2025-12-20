@@ -5,8 +5,19 @@ import { useQuery, useMutation } from 'convex/react';
 import { useSession } from 'next-auth/react';
 import { AdvancedDataTable, AdvancedColumnDef, ColumnFilterConfig } from '@/components/ui/advanced-data-table';
 import { Button } from '@/components/ui/button';
-import { Plus, Pencil, Trash, Eye, Mail, Phone } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Plus, Pencil, Trash, Eye, Mail, Phone, DollarSign } from 'lucide-react';
 import { AddCustomerDialog } from './add-customer-dialog';
+import { CustomerPaymentModal } from './customer-payment-modal';
 import { Badge } from '@/components/ui/badge';
 import { Customer } from '@/types';
 import { format } from 'date-fns';
@@ -21,9 +32,18 @@ interface CustomerListWithAdvancedTableProps {
 export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvancedTableProps) {
   const [open, setOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [paymentCustomerId, setPaymentCustomerId] = useState<string | null>(null);
+  const [paymentCustomerName, setPaymentCustomerName] = useState<string>('');
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const { data: session } = useSession();
   const userEmail = session?.user?.email;
   const { toast } = useToast();
+
+  // Delete customer mutation
+  const deleteCustomerMutation = useMutation(api.mutations.customers.deleteCustomer);
 
   // Load customers from Convex
   const customers = useQuery(
@@ -61,8 +81,39 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
   };
 
   const handleDeleteCustomer = (customer: Customer) => {
-    console.log('Delete customer:', customer);
-    // TODO: Implement delete customer confirmation
+    setCustomerToDelete(customer);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteCustomer = async () => {
+    if (!customerToDelete || !customerToDelete.id) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await deleteCustomerMutation({
+        customerId: customerToDelete.id as any,
+        userEmail,
+      });
+
+      toast({
+        title: "Success",
+        description: `Customer "${customerToDelete.name}" has been deleted successfully.`,
+      });
+
+      setDeleteDialogOpen(false);
+      setCustomerToDelete(null);
+    } catch (error: any) {
+      console.error('Error deleting customer:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete customer. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleSendEmail = (customer: Customer) => {
@@ -73,6 +124,12 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
   const handleCallCustomer = (customer: Customer) => {
     console.log('Call customer:', customer.phone);
     // TODO: Implement call functionality
+  };
+
+  const handleMakePayment = (customer: Customer) => {
+    setPaymentCustomerId(customer.id || null);
+    setPaymentCustomerName(customer.name);
+    setPaymentModalOpen(true);
   };
 
   const getStatusBadge = (status: string) => {
@@ -424,12 +481,21 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
             >
               <Trash className="h-3 w-3" />
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-green-600 hover:text-green-700"
+              onClick={() => handleMakePayment(customer)}
+              title="Make Payment"
+            >
+              <DollarSign className="h-3 w-3" />
+            </Button>
           </div>
         );
       },
       enableSorting: false,
       enableColumnFilter: false,
-      size: 140,
+      size: 180,
     },
   ];
 
@@ -482,7 +548,6 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
         enableMultiSort={true}
         defaultPageSize={10}
         pageSizeOptions={[5, 10, 20, 50, 100]}
-        onRowClick={handleViewCustomer}
         onSelectionChange={(selectedCustomers) => {
           console.log('Selected customers:', selectedCustomers);
         }}
@@ -508,6 +573,47 @@ export function CustomerListWithAdvancedTable({ userId }: CustomerListWithAdvanc
           });
         }}
       />
+
+      {/* Payment Modal */}
+      <CustomerPaymentModal
+        customerId={paymentCustomerId}
+        customerName={paymentCustomerName}
+        open={paymentModalOpen}
+        onOpenChange={setPaymentModalOpen}
+        onPaymentSuccess={() => {
+          // Customer list will automatically refresh via useQuery
+          toast({
+            title: "Success",
+            description: "Payment processed successfully.",
+          });
+        }}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{customerToDelete?.name}</strong>?
+              <br />
+              <span className="text-muted-foreground text-xs mt-2 block">
+                This will deactivate the customer. The customer will no longer appear in active lists but historical data will be preserved.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteCustomer}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { api } from "@/lib/convex";
 import { AdvancedDataTable } from "@/components/ui/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Eye, Download, Lock } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,10 +13,19 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 import type { AdvancedColumnDef } from "@/components/ui/advanced-data-table";
 import type { AuditLog } from "@/types/models";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 interface AuditLogViewerAdvancedProps {
   userId?: string;
@@ -25,6 +34,9 @@ interface AuditLogViewerAdvancedProps {
 }
 
 export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLogViewerAdvancedProps) {
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+
   // Build query args - only include userId if it's a valid Convex ID format
   // Convex IDs are strings that don't contain hyphens or spaces
   const queryArgs = useMemo(() => {
@@ -144,14 +156,17 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
       filterConfig: {
         type: "select",
         options: [
-          { label: "Product", value: "product" },
-          { label: "Brand", value: "brand" },
-          { label: "Category", value: "category" },
-          { label: "Unit", value: "unit" },
-          { label: "Godown", value: "godown" },
-          { label: "Sale", value: "sale" },
-          { label: "Customer", value: "customer" },
-          { label: "User", value: "user" }
+          { label: "Product", value: "products" },
+          { label: "Brand", value: "brands" },
+          { label: "Category", value: "categories" },
+          { label: "Unit", value: "units" },
+          { label: "Godown", value: "godowns" },
+          { label: "Invoice", value: "invoices" },
+          { label: "Customer", value: "customers" },
+          { label: "User", value: "users" },
+          { label: "Payment Method", value: "paymentMethods" },
+          { label: "Commission Agent", value: "commissionAgents" },
+          { label: "Payment", value: "payments" },
         ],
         placeholder: "Filter by entity type"
       }
@@ -174,15 +189,14 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
       header: "Changes",
       cell: ({ row }) => {
         const changes = row.getValue("changes") as any[];
+        if (changes.length === 0) {
+          return <span className="text-muted-foreground text-sm">No changes</span>;
+        }
         return (
-          <div className="max-w-xs truncate">
-            {changes.length > 0 ? (
-              <code className="text-xs">
-                {JSON.stringify(changes).slice(0, 50)}...
-              </code>
-            ) : (
-              <span className="text-muted-foreground">No changes</span>
-            )}
+          <div className="max-w-xs">
+            <Badge variant="outline" className="text-xs">
+              {changes.length} field{changes.length !== 1 ? 's' : ''} changed
+            </Badge>
           </div>
         );
       }
@@ -213,10 +227,15 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => handleViewDetails(log)}>
+              <DropdownMenuItem onClick={() => {
+                setSelectedLog(log);
+                setDetailsDialogOpen(true);
+              }}>
+                <Eye className="h-4 w-4 mr-2" />
                 View Details
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleExportLog(log)}>
+                <Download className="h-4 w-4 mr-2" />
                 Export Log
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -225,10 +244,6 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
       },
     },
   ];
-
-  const handleViewDetails = (log: AuditLog) => {
-    console.log("View details for log:", log);
-  };
 
   const handleExportLog = (log: AuditLog) => {
     const logData = {
@@ -252,6 +267,17 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
     URL.revokeObjectURL(url);
   };
 
+  const formatValue = (value: any, dataType: string): string => {
+    if (value === null || value === undefined) return "N/A";
+    if (dataType === "date" || value instanceof Date) {
+      return format(new Date(value), "MMM dd, yyyy HH:mm:ss");
+    }
+    if (typeof value === "object") {
+      return JSON.stringify(value, null, 2);
+    }
+    return String(value);
+  };
+
   if (convexLogs === undefined) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -262,6 +288,11 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+        <Lock className="h-4 w-4" />
+        <span>Audit logs are read-only and cannot be edited or deleted. All changes are permanently recorded.</span>
+      </div>
+      
       {auditLogsData.length === 0 ? (
         <div className="flex items-center justify-center p-8">
           <div className="text-muted-foreground">No audit logs found</div>
@@ -285,6 +316,141 @@ export function AuditLogViewerAdvanced({ userId, entityType, entityId }: AuditLo
           pageSizeOptions={[5, 10, 25, 50, 100]}
         />
       )}
+
+      {/* Audit Log Details Dialog */}
+      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Audit Log Details</DialogTitle>
+            <DialogDescription>
+              Complete audit trail information. This log is read-only and cannot be modified.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedLog && (
+            <div className="space-y-4 py-4">
+              {/* Basic Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Basic Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Action</p>
+                      <Badge variant={getActionBadgeVariant(selectedLog.action)} className="mt-1">
+                        {selectedLog.action}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Timestamp</p>
+                      <p className="text-sm mt-1">{format(selectedLog.createdAt, "MMM dd, yyyy HH:mm:ss")}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">User</p>
+                      <p className="text-sm mt-1">{selectedLog.userName}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Entity Type</p>
+                      <p className="text-sm mt-1 font-mono">{selectedLog.entityType}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-sm font-medium text-muted-foreground">Entity ID</p>
+                      <code className="text-xs font-mono bg-muted p-1 rounded mt-1 block break-all">
+                        {selectedLog.entityId}
+                      </code>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Changes */}
+              {selectedLog.changes && selectedLog.changes.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Changes</CardTitle>
+                    <CardDescription>
+                      {selectedLog.changes.length} field{selectedLog.changes.length !== 1 ? 's' : ''} modified
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {selectedLog.changes.map((change, index) => (
+                        <div key={index} className="border rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium text-sm">{change.field}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {change.dataType}
+                            </Badge>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <p className="text-muted-foreground mb-1">Old Value</p>
+                              <code className="text-xs bg-red-50 dark:bg-red-950 p-2 rounded block break-all">
+                                {formatValue(change.oldValue, change.dataType)}
+                              </code>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground mb-1">New Value</p>
+                              <code className="text-xs bg-green-50 dark:bg-green-950 p-2 rounded block break-all">
+                                {formatValue(change.newValue, change.dataType)}
+                              </code>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Metadata */}
+              {(selectedLog.metadata || selectedLog.ipAddress || selectedLog.userAgent) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Metadata</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {selectedLog.ipAddress && (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">IP Address</p>
+                        <p className="text-sm font-mono">{selectedLog.ipAddress}</p>
+                      </div>
+                    )}
+                    {selectedLog.userAgent && (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">User Agent</p>
+                        <p className="text-sm break-all">{selectedLog.userAgent}</p>
+                      </div>
+                    )}
+                    {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Additional Metadata</p>
+                        <pre className="text-xs bg-muted p-3 rounded overflow-auto">
+                          {JSON.stringify(selectedLog.metadata, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => handleExportLog(selectedLog)}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Log
+                </Button>
+                <Button onClick={() => setDetailsDialogOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

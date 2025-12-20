@@ -162,6 +162,26 @@ export const createInvoice = mutation({
       updatedBy: currentUser._id,
     });
 
+    // Create payment record if payment was made during invoice creation
+    if (paymentAmountCents > 0 && args.paymentMethod) {
+      await ctx.db.insert("payments", {
+        organizationId,
+        invoiceId,
+        customerId: args.customerId,
+        amountCents: paymentAmountCents,
+        paymentMethod: args.paymentMethod,
+        reference: undefined,
+        notes: args.notes || undefined,
+        paymentDate: args.invoiceDate, // Use invoice date as payment date
+        status: "completed",
+        processedBy: currentUser._id,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: currentUser._id,
+        updatedBy: currentUser._id,
+      });
+    }
+
     // Update customer sales tracking if this is a sale
     if (args.type === "sale" && args.customerId) {
       const customer = await ctx.db.get(args.customerId);

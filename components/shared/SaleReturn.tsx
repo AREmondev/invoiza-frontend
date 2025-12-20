@@ -90,10 +90,10 @@ export function SaleReturn({
   }, 0);
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
-    }).format(amount / 100);
+      currency: 'BDT',
+    }).format(amount / 100).replace(/BDT/g, '৳').trim();
   };
 
   const handleSubmit = () => {

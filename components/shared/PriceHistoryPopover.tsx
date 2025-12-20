@@ -41,10 +41,10 @@ export function PriceHistoryPopover({
     : [];
   
   const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-BD', {
       style: 'currency',
-      currency: 'USD',
-    }).format(price / 100); // Convert cents to dollars
+      currency: 'BDT',
+    }).format(price / 100).replace(/BDT/g, '৳').trim(); // Convert cents to taka
   };
 
   const formatDate = (date: Date) => {

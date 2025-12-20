@@ -60,10 +60,10 @@ const purchaseFormSchema = z.object({
 });
 
 const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('en-BD', {
     style: 'currency',
-    currency: 'USD',
-  }).format(amount);
+    currency: 'BDT',
+  }).format(amount).replace(/BDT/g, '৳').trim();
 };
 
 type PurchaseFormData = z.infer<typeof purchaseFormSchema>;
@@ -279,7 +279,7 @@ export function EnhancedPurchaseForm({
       dueCents: Math.round(totals.total * 100),
       status: "draft",
       paymentStatus: "pending",
-      paymentMethod: "cash",
+      paymentMethod: "cash", // Default payment method - will be updated when payment is made
       lineItems: invoice?.lineItems || [],
       additionalCharges: invoice?.additionalCharges.map(charge => ({
         ...charge,

@@ -1,10 +1,12 @@
 "use client";
 
+import { useQuery, useMutation } from "convex/react";
+import { useSession } from "next-auth/react";
 import { AdvancedDataTable } from "@/components/ui/advanced-data-table";
 import type { AdvancedColumnDef } from "@/components/ui/advanced-data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MoreHorizontal, Pencil, Trash } from "lucide-react";
+import { Plus, Pencil, Trash, DollarSign } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,75 +14,79 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
+import { api } from "@/lib/convex";
+import { formatCurrency } from "@/lib/currency";
+import { useToast } from "@/hooks/use-toast";
+import { AddPaymentMethodDialog } from "@/components/payment-methods/add-payment-method-dialog";
+import { EditPaymentMethodDialog } from "@/components/payment-methods/edit-payment-method-dialog";
+import { useState, useMemo } from "react";
 
 interface BankListAdvancedProps {
   userId?: string;
 }
 
-// Type for bank account data
-interface BankAccount {
-  id: string;
-  bankName: string;
-  accountNumber: string;
-  balance: number;
-  type: string;
-  status: string;
-  lastTransaction: Date;
-}
-
-// Mock data for bank accounts
-const bankAccountsData: BankAccount[] = [
-  {
-    id: "1",
-    bankName: "Chase Bank",
-    accountNumber: "****1234",
-    balance: 8234.5,
-    type: "Checking",
-    status: "Active",
-    lastTransaction: new Date("2024-03-15"),
-  },
-  {
-    id: "2",
-    bankName: "Bank of America",
-    accountNumber: "****5678",
-    balance: 4111.17,
-    type: "Savings",
-    status: "Active",
-    lastTransaction: new Date("2024-03-14"),
-  },
-  {
-    id: "3",
-    bankName: "Wells Fargo",
-    accountNumber: "****9012",
-    balance: 15678.25,
-    type: "Business",
-    status: "Active",
-    lastTransaction: new Date("2024-03-13"),
-  },
-  {
-    id: "4",
-    bankName: "Citibank",
-    accountNumber: "****3456",
-    balance: 2345.8,
-    type: "Checking",
-    status: "Inactive",
-    lastTransaction: new Date("2024-03-10"),
-  },
-  {
-    id: "5",
-    bankName: "HSBC",
-    accountNumber: "****7890",
-    balance: 9876.15,
-    type: "Savings",
-    status: "Active",
-    lastTransaction: new Date("2024-03-12"),
-  },
-];
-
 export function BankListAdvanced({ userId }: BankListAdvancedProps) {
-  const columns: AdvancedColumnDef<BankAccount, unknown>[] = [
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
+  const { toast } = useToast();
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedMethod, setSelectedMethod] = useState<any>(null);
+
+  // Fetch bank payment methods
+  const bankMethods = useQuery(
+    api.queries.paymentMethods.getPaymentMethodsByType,
+    userEmail ? { userEmail, type: "bank" } : "skip"
+  ) || [];
+
+  // Fetch payment totals by method
+  const paymentTotalsByMethod = useQuery(
+    api.queries.payments.getPaymentTotalsByMethod,
+    userEmail ? { userEmail } : "skip"
+  ) || {};
+
+  // Combine bank methods with their totals
+  const bankMethodsWithTotals = useMemo(() => {
+    return bankMethods.map((method: any) => ({
+      ...method,
+      totalReceivedCents: paymentTotalsByMethod[method.code] || 0,
+    }));
+  }, [bankMethods, paymentTotalsByMethod]);
+
+  const deleteMethodMutation = useMutation(api.mutations.paymentMethods.deletePaymentMethod);
+
+  const handleEditMethod = (method: any) => {
+    setSelectedMethod(method);
+    setEditDialogOpen(true);
+  };
+
+  const handleDeleteMethod = async (method: any) => {
+    if (!confirm(`Are you sure you want to delete "${method.name}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteMethodMutation({
+        methodId: method._id,
+        userEmail,
+      });
+      toast({
+        title: "Success",
+        description: "Bank account deleted successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete bank account",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const columns: AdvancedColumnDef<any, unknown>[] = [
     {
-      accessorKey: "bankName",
+      accessorKey: "name",
       header: "Bank Name",
       filterConfig: {
         type: "text",
@@ -88,34 +94,49 @@ export function BankListAdvanced({ userId }: BankListAdvancedProps) {
       }
     },
     {
+      accessorKey: "bankName",
+      header: "Bank",
+      cell: ({ row }) => {
+        const bankName = row.getValue("bankName") as string;
+        return bankName || "-";
+      },
+      filterConfig: {
+        type: "text",
+        placeholder: "Filter by bank"
+      }
+    },
+    {
       accessorKey: "accountNumber",
       header: "Account Number",
+      cell: ({ row }) => {
+        const accountNumber = row.getValue("accountNumber") as string;
+        return accountNumber ? `****${accountNumber.slice(-4)}` : "-";
+      },
       filterConfig: {
         type: "text",
         placeholder: "Filter by account number"
       }
     },
     {
-      accessorKey: "type",
-      header: "Account Type",
+      accessorKey: "accountHolderName",
+      header: "Account Holder",
+      cell: ({ row }) => {
+        const holderName = row.getValue("accountHolderName") as string;
+        return holderName || "-";
+      },
       filterConfig: {
-        type: "select",
-        options: [
-          { label: "Checking", value: "Checking" },
-          { label: "Savings", value: "Savings" },
-          { label: "Business", value: "Business" }
-        ],
-        placeholder: "Filter by type"
+        type: "text",
+        placeholder: "Filter by account holder"
       }
     },
     {
-      accessorKey: "balance",
-      header: "Balance",
+      accessorKey: "balanceCents",
+      header: "Current Balance",
       cell: ({ row }) => {
-        const balance = row.getValue("balance") as number;
+        const balance = row.getValue("balanceCents") as number;
         return (
           <div className="text-right font-medium">
-            ${balance.toFixed(2)}
+            {formatCurrency(balance || 0)}
           </div>
         );
       },
@@ -126,21 +147,38 @@ export function BankListAdvanced({ userId }: BankListAdvancedProps) {
       aggregationFn: "sum"
     },
     {
-      accessorKey: "status",
+      accessorKey: "totalReceivedCents",
+      header: "Total Received",
+      cell: ({ row }) => {
+        const totalReceived = row.getValue("totalReceivedCents") as number;
+        return (
+          <div className="text-right font-bold text-primary">
+            {formatCurrency(totalReceived || 0)}
+          </div>
+        );
+      },
+      filterConfig: {
+        type: "range",
+        placeholder: "Filter by total received"
+      },
+      aggregationFn: "sum"
+    },
+    {
+      accessorKey: "isActive",
       header: "Status",
       cell: ({ row }) => {
-        const status = row.getValue("status") as string;
+        const isActive = row.getValue("isActive") as boolean;
         return (
-          <Badge variant={status === "Active" ? "default" : "secondary"}>
-            {status}
+          <Badge variant={isActive ? "default" : "secondary"}>
+            {isActive ? "Active" : "Inactive"}
           </Badge>
         );
       },
       filterConfig: {
         type: "select",
         options: [
-          { label: "Active", value: "Active" },
-          { label: "Inactive", value: "Inactive" }
+          { label: "Active", value: "true" },
+          { label: "Inactive", value: "false" }
         ],
         placeholder: "Filter by status"
       }
@@ -148,7 +186,7 @@ export function BankListAdvanced({ userId }: BankListAdvancedProps) {
     {
       id: "actions",
       cell: ({ row }) => {
-        const account = row.original;
+        const method = row.original;
         return (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -158,11 +196,14 @@ export function BankListAdvanced({ userId }: BankListAdvancedProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => handleEditAccount(account.id)}>
+              <DropdownMenuItem onClick={() => handleEditMethod(method)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleDeleteAccount(account.id)}>
+              <DropdownMenuItem
+                onClick={() => handleDeleteMethod(method)}
+                className="text-destructive"
+              >
                 <Trash className="mr-2 h-4 w-4" />
                 Delete
               </DropdownMenuItem>
@@ -173,33 +214,65 @@ export function BankListAdvanced({ userId }: BankListAdvancedProps) {
     },
   ];
 
-  const handleEditAccount = (id: string) => {
-    console.log("Edit account:", id);
-  };
-
-  const handleDeleteAccount = (id: string) => {
-    console.log("Delete account:", id);
-  };
-
   return (
     <div className="space-y-4">
-      <AdvancedDataTable
-        columns={columns as any}
-        data={bankAccountsData}
-        tableId="banking-accounts"
-        userId={userId ?? "default"}
-        searchable={true}
-        columnVisibility={true}
-        pagination={true}
-        rowSelection={true}
-        enableGrouping={true}
-        enableExport={true}
-        exportFormats={["csv", "excel"]}
-        enableAdvancedFilters={true}
-        enableMultiSort={true}
-        defaultPageSize={10}
-        pageSizeOptions={[5, 10, 25, 50, 100]}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-semibold">Bank Accounts</h2>
+          <p className="text-sm text-muted-foreground">
+            Manage your bank accounts and track balances
+          </p>
+        </div>
+        <Button onClick={() => setAddDialogOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Bank Account
+        </Button>
+      </div>
+
+      {bankMethods.length === 0 ? (
+        <div className="text-center py-12 border rounded-lg">
+          <p className="text-muted-foreground mb-4">No bank accounts found</p>
+          <Button onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Bank Account
+          </Button>
+        </div>
+      ) : (
+        <AdvancedDataTable
+          columns={columns as any}
+          data={bankMethodsWithTotals}
+          tableId="banking-accounts"
+          userId={userId ?? "default"}
+          searchable={true}
+          columnVisibility={true}
+          pagination={true}
+          rowSelection={true}
+          enableGrouping={true}
+          enableExport={true}
+          exportFormats={["csv", "excel"]}
+          enableAdvancedFilters={true}
+          enableMultiSort={true}
+          defaultPageSize={10}
+          pageSizeOptions={[5, 10, 25, 50, 100]}
+        />
+      )}
+
+      <AddPaymentMethodDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
       />
+
+      {selectedMethod && (
+        <EditPaymentMethodDialog
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          method={selectedMethod}
+          onSuccess={() => {
+            setEditDialogOpen(false);
+            setSelectedMethod(null);
+          }}
+        />
+      )}
     </div>
   );
 }

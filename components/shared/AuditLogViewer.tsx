@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery } from "convex/react";
+import { useSession } from "next-auth/react";
 import { format } from "date-fns";
-import { Search, Filter, Download, RefreshCw, Calendar, User, Activity } from "lucide-react";
+import { Search, Filter, Download, RefreshCw, Calendar, User, Activity, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -14,6 +16,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AuditTimeline } from "@/components/shared/AuditTimeline";
 import { useUserStore } from "@/store/useUserStore";
+import { api } from "@/lib/convex";
 import type { AuditLog } from "@/types/models";
 
 interface AuditLogViewerProps {
@@ -23,145 +26,67 @@ interface AuditLogViewerProps {
 }
 
 export function AuditLogViewer({ entityType, entityId, compact = false }: AuditLogViewerProps) {
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>([]);
-  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [userFilter, setUserFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
   const [viewMode, setViewMode] = useState<"table" | "timeline">("timeline");
   
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email;
   const { currentUser, hasPermission } = useUserStore();
 
-  // Mock audit logs - in a real app, this would come from your backend
-  const mockAuditLogs: AuditLog[] = [
-    {
-      id: "1",
-      action: "create",
-      entityType: "sale",
-      entityId: "sale_001",
-      userId: "user_001",
-      userName: "John Doe",
-      createdAt: new Date("2024-03-15T10:30:00Z"),
-      updatedAt: new Date("2024-03-15T10:30:00Z"),
-      createdBy: "user_001",
-      updatedBy: "user_001",
-      changes: [
-        { field: "customerId", oldValue: null, newValue: "customer_001", dataType: "string" },
-        { field: "total", oldValue: null, newValue: 1500, dataType: "number" }
-      ],
-      metadata: {
-        ipAddress: "192.168.1.100",
-        userAgent: "Mozilla/5.0...",
-      },
-    },
-    {
-      id: "2",
-      action: "update",
-      entityType: "product",
-      entityId: "product_001",
-      userId: "user_002",
-      userName: "Jane Smith",
-      createdAt: new Date("2024-03-15T11:15:00Z"),
-      updatedAt: new Date("2024-03-15T11:15:00Z"),
-      createdBy: "user_002",
-      updatedBy: "user_002",
-      changes: [
-        { field: "price", oldValue: 100, newValue: 120, dataType: "number" }
-      ],
-      metadata: {
-        ipAddress: "192.168.1.101",
-        userAgent: "Mozilla/5.0...",
-      },
-    },
-    {
-      id: "3",
-      action: "delete",
-      entityType: "customer",
-      entityId: "customer_002",
-      userId: "user_001",
-      userName: "John Doe",
-      createdAt: new Date("2024-03-15T14:20:00Z"),
-      updatedAt: new Date("2024-03-15T14:20:00Z"),
-      createdBy: "user_001",
-      updatedBy: "user_001",
-      changes: [
-        { field: "name", oldValue: "Test Customer", newValue: null, dataType: "string" },
-        { field: "email", oldValue: "test@example.com", newValue: null, dataType: "string" }
-      ],
-      metadata: {
-        ipAddress: "192.168.1.100",
-        userAgent: "Mozilla/5.0...",
-      },
-    },
-    {
-      id: "4",
-      action: "create",
-      entityType: "user",
-      entityId: "user_003",
-      userId: "user_003",
-      userName: "Bob Johnson",
-      createdAt: new Date("2024-03-15T16:45:00Z"),
-      updatedAt: new Date("2024-03-15T16:45:00Z"),
-      createdBy: "user_003",
-      updatedBy: "user_003",
-      changes: [],
-      metadata: {
-        ipAddress: "192.168.1.102",
-        userAgent: "Mozilla/5.0...",
-      },
-    },
-    {
-      id: "5",
-      action: "update",
-      entityType: "sale",
-      entityId: "sale_002",
-      userId: "user_002",
-      userName: "Jane Smith",
-      createdAt: new Date("2024-03-15T18:30:00Z"),
-      updatedAt: new Date("2024-03-15T18:30:00Z"),
-      createdBy: "user_002",
-      updatedBy: "user_002",
-      changes: [
-        { field: "agreedPrice", oldValue: 200, newValue: 180, dataType: "number" }
-      ],
-      metadata: {
-        ipAddress: "192.168.1.101",
-        userAgent: "Mozilla/5.0...",
-        violationType: "below_agreement",
-      },
-    },
-  ];
-
-  useEffect(() => {
-    loadAuditLogs();
+  // Build query args
+  const queryArgs = useMemo(() => {
+    const args: any = { limit: 1000 };
+    
+    if (entityType && entityId) {
+      args.entityType = entityType;
+      args.entityId = entityId;
+    } else if (entityType) {
+      args.entityType = entityType;
+    }
+    
+    return args;
   }, [entityType, entityId]);
+
+  // Fetch audit logs from Convex
+  const convexLogs = useQuery(
+    api.queries.auditLogs.getAuditLogs,
+    queryArgs
+  );
+
+  // Transform Convex audit logs to match AuditLog type
+  const auditLogs: AuditLog[] = useMemo(() => {
+    if (!convexLogs) return [];
+
+    return convexLogs.map((log) => ({
+      id: log._id,
+      action: log.action as AuditLog["action"],
+      entityType: log.entityType,
+      entityId: log.entityId,
+      userId: log.userId,
+      userName: log.userName,
+      createdAt: new Date(log.timestamp),
+      updatedAt: new Date(log.updatedAt),
+      createdBy: log.userId,
+      updatedBy: log.userId,
+      changes: log.changes.map((change) => ({
+        field: change.field,
+        oldValue: change.oldValue,
+        newValue: change.newValue,
+        dataType: change.dataType,
+      })),
+      metadata: log.metadata || {},
+      ipAddress: log.ipAddress,
+      userAgent: log.userAgent,
+    }));
+  }, [convexLogs]);
 
   useEffect(() => {
     filterLogs();
   }, [auditLogs, searchTerm, actionFilter, userFilter, dateRange]);
-
-  const loadAuditLogs = async () => {
-    setLoading(true);
-    try {
-      // In a real app, this would be an API call
-      // For now, we'll use mock data
-      let logs = mockAuditLogs;
-      
-      if (entityType && entityId) {
-        logs = logs.filter(log => log.entityType === entityType && log.entityId === entityId);
-      } else if (entityType) {
-        logs = logs.filter(log => log.entityType === entityType);
-      }
-      
-      setAuditLogs(logs);
-    } catch (error) {
-      console.error("Failed to load audit logs:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filterLogs = () => {
     let filtered = [...auditLogs];
@@ -288,10 +213,9 @@ export function AuditLogViewer({ entityType, entityId, compact = false }: AuditL
           </Button>
           <Button
             variant="outline"
-            onClick={loadAuditLogs}
-            disabled={loading}
+            onClick={() => window.location.reload()}
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
         </div>
@@ -343,9 +267,16 @@ export function AuditLogViewer({ entityType, entityId, compact = false }: AuditL
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Users</SelectItem>
-                  <SelectItem value="user_001">John Doe</SelectItem>
-                  <SelectItem value="user_002">Jane Smith</SelectItem>
-                  <SelectItem value="user_003">Bob Johnson</SelectItem>
+                  {Array.from(new Set(auditLogs.map(log => log.userId)))
+                    .map(userId => {
+                      const log = auditLogs.find(l => l.userId === userId);
+                      return log ? (
+                        <SelectItem key={userId} value={userId}>
+                          {log.userName}
+                        </SelectItem>
+                      ) : null;
+                    })
+                    .filter(Boolean)}
                 </SelectContent>
               </Select>
             </div>

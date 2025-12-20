@@ -20,6 +20,8 @@ import type * as mutations_commissionAgents from "../mutations/commissionAgents.
 import type * as mutations_customers from "../mutations/customers.js";
 import type * as mutations_godowns from "../mutations/godowns.js";
 import type * as mutations_invoices from "../mutations/invoices.js";
+import type * as mutations_paymentMethods from "../mutations/paymentMethods.js";
+import type * as mutations_payments from "../mutations/payments.js";
 import type * as mutations_permissions from "../mutations/permissions.js";
 import type * as mutations_products from "../mutations/products.js";
 import type * as mutations_roles from "../mutations/roles.js";
@@ -35,6 +37,8 @@ import type * as queries_commissionAgents from "../queries/commissionAgents.js";
 import type * as queries_customers from "../queries/customers.js";
 import type * as queries_godowns from "../queries/godowns.js";
 import type * as queries_invoices from "../queries/invoices.js";
+import type * as queries_paymentMethods from "../queries/paymentMethods.js";
+import type * as queries_payments from "../queries/payments.js";
 import type * as queries_permissions from "../queries/permissions.js";
 import type * as queries_priceHistory from "../queries/priceHistory.js";
 import type * as queries_products from "../queries/products.js";
@@ -61,6 +65,8 @@ declare const fullApi: ApiFromModules<{
   "mutations/customers": typeof mutations_customers;
   "mutations/godowns": typeof mutations_godowns;
   "mutations/invoices": typeof mutations_invoices;
+  "mutations/paymentMethods": typeof mutations_paymentMethods;
+  "mutations/payments": typeof mutations_payments;
   "mutations/permissions": typeof mutations_permissions;
   "mutations/products": typeof mutations_products;
   "mutations/roles": typeof mutations_roles;
@@ -76,6 +82,8 @@ declare const fullApi: ApiFromModules<{
   "queries/customers": typeof queries_customers;
   "queries/godowns": typeof queries_godowns;
   "queries/invoices": typeof queries_invoices;
+  "queries/paymentMethods": typeof queries_paymentMethods;
+  "queries/payments": typeof queries_payments;
   "queries/permissions": typeof queries_permissions;
   "queries/priceHistory": typeof queries_priceHistory;
   "queries/products": typeof queries_products;
